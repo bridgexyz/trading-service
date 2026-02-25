@@ -8,7 +8,7 @@ discrepancies.
 Scenarios handled:
 1. DB has position, exchange has matching position → OK, no action
 2. DB has position, exchange has NO position → stale DB record, clean up
-3. Exchange has position not tracked in DB → orphaned, log warning
+3. Exchange has position not tracked in DB → auto-create OpenPosition if both legs match a pair
 """
 
 import logging
@@ -129,7 +129,7 @@ async def sync_positions_on_startup():
                 )
                 session.delete(db_pos)
 
-        # Check for exchange positions not tracked in DB
+        # Auto-recover exchange positions not tracked in DB
         tracked_markets: set[int] = set()
         for db_pos in db_positions:
             p = session.get(TradingPair, db_pos.pair_id)
@@ -137,6 +137,55 @@ async def sync_positions_on_startup():
                 tracked_markets.add(p.lighter_market_a)
                 tracked_markets.add(p.lighter_market_b)
 
+        # Try to match untracked positions to enabled pair configs
+        all_pairs = session.exec(
+            select(TradingPair).where(TradingPair.is_enabled == True)
+        ).all()
+        for pair in all_pairs:
+            # Skip pairs that already have a DB position
+            if any(dp.pair_id == pair.id for dp in db_positions):
+                continue
+            has_a = pair.lighter_market_a in exchange_by_market
+            has_b = pair.lighter_market_b in exchange_by_market
+            if has_a and has_b:
+                ex_a = exchange_by_market[pair.lighter_market_a]
+                ex_b = exchange_by_market[pair.lighter_market_b]
+                direction = 1 if ex_a["side"] == "long" else -1
+                size_a = ex_a["size"]
+                size_b = ex_b["size"]
+                notional = ex_a["entry_price"] * size_a + ex_b["entry_price"] * size_b
+                hedge_ratio = size_b / size_a if size_a > 0 else 0
+                pos = OpenPosition(
+                    pair_id=pair.id,
+                    direction=direction,
+                    entry_z=0,
+                    entry_spread=0,
+                    entry_price_a=ex_a["entry_price"],
+                    entry_price_b=ex_b["entry_price"],
+                    entry_hedge_ratio=hedge_ratio,
+                    entry_notional=notional,
+                )
+                session.add(pos)
+                tracked_markets.add(pair.lighter_market_a)
+                tracked_markets.add(pair.lighter_market_b)
+                logger.warning(
+                    f"Position sync: auto-created DB position for {pair.name} "
+                    f"(direction={direction}, notional=${notional:.0f})"
+                )
+                _log_sync_event(
+                    session, pair.id,
+                    f"Auto-recovered position from exchange "
+                    f"(direction={direction}, hedge_ratio={hedge_ratio:.4f}, notional=${notional:.0f})",
+                )
+            elif has_a or has_b:
+                present = "A" if has_a else "B"
+                missing = "B" if has_a else "A"
+                logger.warning(
+                    f"Position sync: pair {pair.name} has leg {present} on exchange "
+                    f"but no leg {missing} and no DB position. Manual review needed."
+                )
+
+        # Remaining unmatched exchange positions — warn only
         for market_idx, ex_pos in exchange_by_market.items():
             if market_idx not in tracked_markets:
                 logger.warning(
