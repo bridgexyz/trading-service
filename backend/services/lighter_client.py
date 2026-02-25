@@ -143,12 +143,15 @@ class LighterClient:
             )
 
             if market:
-                order, resp, error = await self._signer_client.create_market_order(
+                order, resp, error = await self._signer_client.create_order(
                     market_index=market_index,
                     client_order_index=client_order_index,
                     base_amount=amount_int,
-                    avg_execution_price=price_int,
+                    price=price_int,
                     is_ask=is_ask,
+                    order_type=1,       # MARKET
+                    time_in_force=0,    # IMMEDIATE_OR_CANCEL
+                    order_expiry=int((time.time() + 60) * 1000),  # 1 minute
                 )
             else:
                 order, resp, error = await self._signer_client.create_order(
