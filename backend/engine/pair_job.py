@@ -270,26 +270,27 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
             return
 
         # Verify positions actually exist on the exchange
-        # (market orders can be accepted by SDK but cancelled by exchange)
-        await asyncio.sleep(1)  # Brief delay for exchange settlement
+        # (skip for TWAP — slices fill over minutes, not immediately)
+        if pair.twap_minutes == 0:
+            await asyncio.sleep(1)  # Brief delay for exchange settlement
 
-        exchange_positions = await lighter_client.get_positions()
-        exchange_markets = {p["market_index"] for p in exchange_positions}
+            exchange_positions = await lighter_client.get_positions()
+            exchange_markets = {p["market_index"] for p in exchange_positions}
 
-        has_leg_a = pair.lighter_market_a in exchange_markets
-        has_leg_b = pair.lighter_market_b in exchange_markets
+            has_leg_a = pair.lighter_market_a in exchange_markets
+            has_leg_b = pair.lighter_market_b in exchange_markets
 
-        if not has_leg_a or not has_leg_b:
-            missing = []
-            if not has_leg_a:
-                missing.append(f"leg A (market {pair.lighter_market_a})")
-            if not has_leg_b:
-                missing.append(f"leg B (market {pair.lighter_market_b})")
-            _log_cycle(pair.id, "error", signals=signals, action="entry_not_confirmed",
-                       message=f"Orders accepted but positions not found on exchange: {', '.join(missing)}",
-                       close_a=close_a, close_b=close_b)
-            _notify(f"[{pair.name}] Entry orders accepted but NOT confirmed on exchange. Positions missing: {', '.join(missing)}")
-            return
+            if not has_leg_a or not has_leg_b:
+                missing = []
+                if not has_leg_a:
+                    missing.append(f"leg A (market {pair.lighter_market_a})")
+                if not has_leg_b:
+                    missing.append(f"leg B (market {pair.lighter_market_b})")
+                _log_cycle(pair.id, "error", signals=signals, action="entry_not_confirmed",
+                           message=f"Orders accepted but positions not found on exchange: {', '.join(missing)}",
+                           close_a=close_a, close_b=close_b, market_data=market_data)
+                _notify(f"[{pair.name}] Entry orders accepted but NOT confirmed on exchange. Positions missing: {', '.join(missing)}")
+                return
 
         # Save open position (re-check to prevent duplicates from race conditions)
         with Session(engine) as session:
@@ -394,24 +395,26 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
             return
 
         # Verify positions are actually closed on the exchange
-        await asyncio.sleep(1)  # Brief delay for exchange settlement
+        # (skip for TWAP — slices close over minutes, not immediately)
+        if pair.twap_minutes == 0:
+            await asyncio.sleep(1)  # Brief delay for exchange settlement
 
-        exchange_positions = await lighter_client.get_positions()
-        exchange_markets = {p["market_index"] for p in exchange_positions}
+            exchange_positions = await lighter_client.get_positions()
+            exchange_markets = {p["market_index"] for p in exchange_positions}
 
-        has_leg_a = pair.lighter_market_a in exchange_markets
-        has_leg_b = pair.lighter_market_b in exchange_markets
+            has_leg_a = pair.lighter_market_a in exchange_markets
+            has_leg_b = pair.lighter_market_b in exchange_markets
 
-        if has_leg_a or has_leg_b:
-            still_open = []
-            if has_leg_a:
-                still_open.append(f"leg A (market {pair.lighter_market_a})")
-            if has_leg_b:
-                still_open.append(f"leg B (market {pair.lighter_market_b})")
-            _log_cycle(pair.id, "error", signals=signals, action="exit_not_confirmed",
-                       message=f"Exit orders accepted but positions still open: {', '.join(still_open)}",
-                       close_a=close_a, close_b=close_b)
-            return
+            if has_leg_a or has_leg_b:
+                still_open = []
+                if has_leg_a:
+                    still_open.append(f"leg A (market {pair.lighter_market_a})")
+                if has_leg_b:
+                    still_open.append(f"leg B (market {pair.lighter_market_b})")
+                _log_cycle(pair.id, "error", signals=signals, action="exit_not_confirmed",
+                           message=f"Exit orders accepted but positions still open: {', '.join(still_open)}",
+                           close_a=close_a, close_b=close_b)
+                return
 
         # Compute PnL
         if exit_sig.exit_reason == "stop_loss":
