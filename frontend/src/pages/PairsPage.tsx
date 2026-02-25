@@ -6,7 +6,6 @@ import StatusBadge from "../components/StatusBadge";
 import type { TradingPair } from "../types";
 
 const INTERVALS = ["15m", "1h", "2h", "4h", "8h", "1d"];
-const SCHEDULE_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "2h", "4h"];
 
 interface Market {
   market_id: number;
@@ -32,11 +31,12 @@ const defaultPair = {
   position_size_pct: 50,
   leverage: 5,
   twap_minutes: 0,
-  schedule_interval: "15m",
+  schedule_interval: 10,
   is_enabled: true,
 };
 
 type FormData = typeof defaultPair;
+type SubmitData = Omit<FormData, "schedule_interval"> & { name: string; train_interval: string; schedule_interval: string };
 
 function SectionLabel({ children }: { children: string }) {
   return (
@@ -182,7 +182,7 @@ function PairForm({
   isEdit,
 }: {
   initial: FormData;
-  onSubmit: (data: FormData & { name: string; train_interval: string }) => void;
+  onSubmit: (data: SubmitData) => void;
   onCancel: () => void;
   markets: Market[];
   isEdit: boolean;
@@ -193,7 +193,7 @@ function PairForm({
 
   const handleSubmit = () => {
     const name = `${form.asset_a}-${form.asset_b}`;
-    onSubmit({ ...form, train_interval: form.window_interval, name });
+    onSubmit({ ...form, schedule_interval: `${form.schedule_interval}m`, train_interval: form.window_interval, name });
   };
 
   return (
@@ -258,12 +258,7 @@ function PairForm({
 
       <SectionLabel>Schedule</SectionLabel>
       <div className="flex flex-wrap gap-3 items-end">
-        <SelectField
-          label="Schedule Interval"
-          value={form.schedule_interval as string}
-          onChange={(v) => set("schedule_interval", v)}
-          options={SCHEDULE_INTERVALS}
-        />
+        <Field label="Schedule Interval (min)" value={form.schedule_interval} onChange={(v) => set("schedule_interval", v)} />
         <div>
           <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
             Enabled
@@ -318,7 +313,7 @@ export default function PairsPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (data: FormData & { name: string; train_interval: string }) => api.post("/pairs", data),
+    mutationFn: (data: SubmitData) => api.post("/pairs", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pairs"] });
       setShowForm(false);
@@ -326,7 +321,7 @@ export default function PairsPage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<FormData & { name: string; train_interval: string }> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<SubmitData> }) =>
       api.put(`/pairs/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pairs"] });
@@ -372,7 +367,7 @@ export default function PairsPage() {
     position_size_pct: pair.position_size_pct,
     leverage: pair.leverage,
     twap_minutes: pair.twap_minutes,
-    schedule_interval: pair.schedule_interval,
+    schedule_interval: parseInt(pair.schedule_interval) || 10,
     is_enabled: pair.is_enabled,
   });
 
