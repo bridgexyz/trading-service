@@ -23,6 +23,9 @@ def _job_id(pair_id: int) -> str:
 
 
 def _get_trigger(interval: str) -> IntervalTrigger:
+    # Support arbitrary "<N>m" schedule intervals
+    if interval.endswith("m") and interval[:-1].isdigit():
+        return IntervalTrigger(minutes=int(interval[:-1]))
     hours = INTERVAL_HOURS.get(interval, 4.0)
     if hours < 1:
         return IntervalTrigger(minutes=int(hours * 60))

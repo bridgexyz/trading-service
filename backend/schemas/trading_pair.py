@@ -39,12 +39,23 @@ class TradingPairCreate(BaseModel):
             raise ValueError("must not be empty")
         return text
 
-    @field_validator("window_interval", "train_interval", "schedule_interval")
+    @field_validator("window_interval", "train_interval")
     @classmethod
     def _validate_interval(cls, value: str) -> str:
         if value not in VALID_INTERVALS:
             allowed = ", ".join(VALID_INTERVALS)
             raise ValueError(f"must be one of: {allowed}")
+        return value
+
+    @field_validator("schedule_interval")
+    @classmethod
+    def _validate_schedule_interval(cls, value: str) -> str:
+        import re
+        if not re.match(r"^\d+m$", value):
+            raise ValueError("must be in format '<number>m', e.g. '10m'")
+        minutes = int(value[:-1])
+        if minutes < 1:
+            raise ValueError("must be at least 1m")
         return value
 
     @model_validator(mode="after")
@@ -91,7 +102,7 @@ class TradingPairUpdate(BaseModel):
             raise ValueError("must not be empty")
         return text
 
-    @field_validator("window_interval", "train_interval", "schedule_interval")
+    @field_validator("window_interval", "train_interval")
     @classmethod
     def _validate_optional_interval(cls, value: str | None) -> str | None:
         if value is None:
@@ -99,6 +110,19 @@ class TradingPairUpdate(BaseModel):
         if value not in VALID_INTERVALS:
             allowed = ", ".join(VALID_INTERVALS)
             raise ValueError(f"must be one of: {allowed}")
+        return value
+
+    @field_validator("schedule_interval")
+    @classmethod
+    def _validate_optional_schedule_interval(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        import re
+        if not re.match(r"^\d+m$", value):
+            raise ValueError("must be in format '<number>m', e.g. '10m'")
+        minutes = int(value[:-1])
+        if minutes < 1:
+            raise ValueError("must be at least 1m")
         return value
 
     @model_validator(mode="after")
