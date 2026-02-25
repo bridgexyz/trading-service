@@ -176,6 +176,7 @@ async def sync_positions_on_startup():
                     session, pair.id,
                     f"Auto-recovered position from exchange "
                     f"(direction={direction}, hedge_ratio={hedge_ratio:.4f}, notional=${notional:.0f})",
+                    status="success",
                 )
             elif has_a or has_b:
                 present = "A" if has_a else "B"
@@ -199,11 +200,11 @@ async def sync_positions_on_startup():
     logger.info("Position sync complete")
 
 
-def _log_sync_event(session: Session, pair_id: int, message: str):
+def _log_sync_event(session: Session, pair_id: int, message: str, status: str = "error"):
     """Write a sync event to the job log."""
     log = JobLog(
         pair_id=pair_id,
-        status="warning",
+        status=status,
         action="position_sync",
         message=message,
     )
