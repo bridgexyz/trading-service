@@ -232,7 +232,7 @@ class LighterClient:
                 is_ask=is_ask,
                 order_type=6,           # TWAP
                 time_in_force=1,        # GOOD_TILL_TIME
-                order_expiry=duration_minutes * 60,
+                order_expiry=int(time.time()) + duration_minutes * 60,
             )
             if error is not None:
                 logger.error(f"TWAP order rejected: {error}")
