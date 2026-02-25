@@ -37,6 +37,7 @@ class TradingPair(SQLModel, table=True):
     position_size_pct: float = 50.0  # Percentage of account balance
     tx_cost_bps: float = 0.0
     leverage: float = 5.0
+    twap_minutes: int = 0
     min_equity_pct: float = 40.0
 
     # Scheduling

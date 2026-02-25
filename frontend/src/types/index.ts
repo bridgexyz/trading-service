@@ -18,8 +18,8 @@ export interface TradingPair {
   rsi_period: number;
   stop_loss_pct: number;
   position_size_pct: number;
-  tx_cost_bps: number;
   leverage: number;
+  twap_minutes: number;
   min_equity_pct: number;
   schedule_interval: string;
   is_enabled: boolean;
@@ -70,6 +70,7 @@ export interface JobLog {
   close_b: number | null;
   action: string | null;
   message: string | null;
+  market_data: Record<string, { count: number; first: string | null; last: string | null }> | null;
 }
 
 export interface DashboardSummary {

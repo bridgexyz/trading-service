@@ -1,7 +1,10 @@
 """JobLog model — per-cycle execution log for each pair."""
 
 from datetime import datetime, timezone
-from sqlmodel import SQLModel, Field
+from typing import Any
+
+from sqlmodel import SQLModel, Field, Column
+from sqlalchemy import JSON
 
 
 class JobLog(SQLModel, table=True):
@@ -20,3 +23,4 @@ class JobLog(SQLModel, table=True):
     close_a: float | None = None
     close_b: float | None = None
     message: str | None = None
+    market_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))

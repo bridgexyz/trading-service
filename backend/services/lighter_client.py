@@ -15,6 +15,10 @@ class OrderResult:
     success: bool
     order_id: str | None = None
     error: str | None = None
+    filled_price: float | None = None
+    filled_amount: float | None = None
+    order_status: str | None = None
+    raw_response: str | None = None
 
 
 class LighterClient:
@@ -158,12 +162,96 @@ class LighterClient:
                 )
             if error is not None:
                 logger.error(f"Order rejected: {error}")
-                return OrderResult(success=False, error=str(error))
+                return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
+            filled_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            filled_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
+            order_status = getattr(order, "status", None)
             logger.info(f"Order placed: {order_id} ({'market' if market else 'limit'})")
-            return OrderResult(success=True, order_id=order_id)
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                filled_price=float(filled_price) if filled_price is not None else None,
+                filled_amount=float(filled_amount) if filled_amount is not None else None,
+                order_status=str(order_status) if order_status is not None else None,
+                raw_response=str(resp) if resp else None,
+            )
         except Exception as e:
             logger.error(f"Order failed: {e}")
+            return OrderResult(success=False, error=str(e))
+
+    async def place_twap_order(
+        self,
+        market_index: int,
+        base_amount: float,
+        price: float,
+        is_ask: bool,
+        duration_minutes: int,
+        client_order_index: int | None = None,
+    ) -> OrderResult:
+        """Place a TWAP order on Lighter.
+
+        The exchange handles time-slicing server-side over the given duration.
+
+        Args:
+            market_index: Lighter market index.
+            base_amount: Quantity in asset units.
+            price: Worst acceptable price.
+            is_ask: True for sell, False for buy.
+            duration_minutes: TWAP execution window in minutes.
+            client_order_index: Unique order reference. Auto-generated if None.
+        """
+        await self._ensure_clients()
+
+        if client_order_index is None:
+            client_order_index = int(time.time() * 1000) % (2**31)
+
+        if self._mock_mode:
+            logger.info(
+                f"MOCK TWAP order: market={market_index}, amount={base_amount:.4f}, "
+                f"price={price:.2f}, side={'sell' if is_ask else 'buy'}, "
+                f"duration={duration_minutes}min"
+            )
+            return OrderResult(success=True, order_id=f"mock-twap-{client_order_index}")
+
+        try:
+            meta = await self._get_market_meta(market_index)
+            price_int = int(round(price * 10 ** meta["price_decimals"]))
+            amount_int = int(round(base_amount * 10 ** meta["size_decimals"]))
+            logger.debug(
+                f"TWAP encode: price={price} → {price_int} ({meta['price_decimals']}dp), "
+                f"amount={base_amount} → {amount_int} ({meta['size_decimals']}dp), "
+                f"duration={duration_minutes}min"
+            )
+
+            order, resp, error = await self._signer_client.create_order(
+                market_index=market_index,
+                client_order_index=client_order_index,
+                base_amount=amount_int,
+                price=price_int,
+                is_ask=is_ask,
+                order_type=6,           # TWAP
+                time_in_force=1,        # GOOD_TILL_TIME
+                order_expiry=duration_minutes * 60,
+            )
+            if error is not None:
+                logger.error(f"TWAP order rejected: {error}")
+                return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
+            order_id = str(client_order_index)
+            filled_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            filled_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
+            order_status = getattr(order, "status", None)
+            logger.info(f"TWAP order placed: {order_id} (duration={duration_minutes}min)")
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                filled_price=float(filled_price) if filled_price is not None else None,
+                filled_amount=float(filled_amount) if filled_amount is not None else None,
+                order_status=str(order_status) if order_status is not None else None,
+                raw_response=str(resp) if resp else None,
+            )
+        except Exception as e:
+            logger.error(f"TWAP order failed: {e}")
             return OrderResult(success=False, error=str(e))
 
     async def cancel_order(self, market_index: int, order_id: str) -> bool:
@@ -173,11 +261,11 @@ class LighterClient:
             logger.info(f"MOCK cancel: market={market_index}, order={order_id}")
             return True
         try:
-            _cancel, _resp, error = await self._signer_client.cancel_order(
+            _cancel, resp, error = await self._signer_client.cancel_order(
                 market_index=market_index, order_index=int(order_id)
             )
             if error is not None:
-                logger.error(f"Cancel rejected: {error}")
+                logger.error(f"Cancel rejected: {error} | resp={resp}")
                 return False
             return True
         except Exception as e:

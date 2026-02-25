@@ -12,21 +12,21 @@ class TradingPairCreate(BaseModel):
     asset_b: str = Field(min_length=1, max_length=32)
     lighter_market_a: int = Field(default=0, ge=0)
     lighter_market_b: int = Field(default=0, ge=0)
-    entry_z: float = Field(default=2.0, gt=0)
+    entry_z: float = Field(default=1.5, gt=0)
     exit_z: float = Field(default=0.5, ge=0)
     stop_z: float = Field(default=4.0, gt=0)
     window_interval: str = "4h"
     window_candles: int = Field(default=40, ge=2)
     train_interval: str = "4h"
     train_candles: int = Field(default=100, ge=2)
-    max_half_life: float = Field(default=50.0, ge=0)
-    rsi_upper: float = Field(default=70.0, ge=0, le=100)
-    rsi_lower: float = Field(default=20.0, ge=0, le=100)
+    max_half_life: float = Field(default=10.0, ge=0)
+    rsi_upper: float = Field(default=65.0, ge=0, le=100)
+    rsi_lower: float = Field(default=15.0, ge=0, le=100)
     rsi_period: int = Field(default=14, ge=2)
     stop_loss_pct: float = Field(default=10.0, ge=0)
     position_size_pct: float = Field(default=50.0, gt=0, le=100)
-    tx_cost_bps: float = Field(default=0.0, ge=0)
     leverage: float = Field(default=5.0, gt=0)
+    twap_minutes: int = Field(default=0, ge=0)
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
     schedule_interval: str = "15m"
     is_enabled: bool = True
@@ -75,8 +75,8 @@ class TradingPairUpdate(BaseModel):
     rsi_period: int | None = Field(default=None, ge=2)
     stop_loss_pct: float | None = Field(default=None, ge=0)
     position_size_pct: float | None = Field(default=None, gt=0, le=100)
-    tx_cost_bps: float | None = Field(default=None, ge=0)
     leverage: float | None = Field(default=None, gt=0)
+    twap_minutes: int | None = Field(default=None, ge=0)
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
     schedule_interval: str | None = None
     is_enabled: bool | None = None
@@ -138,8 +138,8 @@ class TradingPairRead(BaseModel):
     rsi_period: int
     stop_loss_pct: float
     position_size_pct: float
-    tx_cost_bps: float
     leverage: float
+    twap_minutes: int
     min_equity_pct: float
     schedule_interval: str
     is_enabled: bool

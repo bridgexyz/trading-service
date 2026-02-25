@@ -18,21 +18,20 @@ const defaultPair = {
   asset_b: "",
   lighter_market_a: 0,
   lighter_market_b: 0,
-  entry_z: 2.0,
+  entry_z: 1.5,
   exit_z: 0.5,
   stop_z: 4.0,
   window_interval: "4h",
   window_candles: 40,
-  train_interval: "4h",
   train_candles: 100,
-  max_half_life: 50,
-  rsi_upper: 70,
-  rsi_lower: 20,
+  max_half_life: 10,
+  rsi_upper: 65,
+  rsi_lower: 15,
   rsi_period: 14,
   stop_loss_pct: 10,
   position_size_pct: 50,
-  tx_cost_bps: 0,
   leverage: 5,
+  twap_minutes: 0,
   schedule_interval: "15m",
   is_enabled: true,
 };
@@ -183,7 +182,7 @@ function PairForm({
   isEdit,
 }: {
   initial: FormData;
-  onSubmit: (data: FormData & { name: string }) => void;
+  onSubmit: (data: FormData & { name: string; train_interval: string }) => void;
   onCancel: () => void;
   markets: Market[];
   isEdit: boolean;
@@ -194,7 +193,7 @@ function PairForm({
 
   const handleSubmit = () => {
     const name = `${form.asset_a}-${form.asset_b}`;
-    onSubmit({ ...form, name });
+    onSubmit({ ...form, train_interval: form.window_interval, name });
   };
 
   return (
@@ -236,9 +235,8 @@ function PairForm({
 
       <SectionLabel>Windows</SectionLabel>
       <div className="flex flex-wrap gap-3">
-        <SelectField label="Z Window" value={form.window_interval as string} onChange={(v) => set("window_interval", v)} options={INTERVALS} />
+        <SelectField label="Window" value={form.window_interval as string} onChange={(v) => set("window_interval", v)} options={INTERVALS} />
         <Field label="Z Candles" value={form.window_candles} onChange={(v) => set("window_candles", v)} />
-        <SelectField label="Train Window" value={form.train_interval as string} onChange={(v) => set("train_interval", v)} options={INTERVALS} />
         <Field label="Train Candles" value={form.train_candles} onChange={(v) => set("train_candles", v)} />
       </div>
 
@@ -254,8 +252,8 @@ function PairForm({
       <div className="flex flex-wrap gap-3">
         <Field label="Stop Loss %" value={form.stop_loss_pct} onChange={(v) => set("stop_loss_pct", v)} />
         <Field label="Position Size (%)" value={form.position_size_pct} onChange={(v) => set("position_size_pct", v)} />
-        <Field label="Tx Cost (bps)" value={form.tx_cost_bps} onChange={(v) => set("tx_cost_bps", v)} />
-        <Field label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} />
+<Field label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} />
+        <Field label="TWAP (min)" value={form.twap_minutes} onChange={(v) => set("twap_minutes", v)} />
       </div>
 
       <SectionLabel>Schedule</SectionLabel>
@@ -320,7 +318,7 @@ export default function PairsPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (data: FormData & { name: string }) => api.post("/pairs", data),
+    mutationFn: (data: FormData & { name: string; train_interval: string }) => api.post("/pairs", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pairs"] });
       setShowForm(false);
@@ -328,7 +326,7 @@ export default function PairsPage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<FormData & { name: string }> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<FormData & { name: string; train_interval: string }> }) =>
       api.put(`/pairs/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pairs"] });
@@ -365,7 +363,6 @@ export default function PairsPage() {
     stop_z: pair.stop_z,
     window_interval: pair.window_interval,
     window_candles: pair.window_candles,
-    train_interval: pair.train_interval,
     train_candles: pair.train_candles,
     max_half_life: pair.max_half_life,
     rsi_upper: pair.rsi_upper,
@@ -373,8 +370,8 @@ export default function PairsPage() {
     rsi_period: pair.rsi_period,
     stop_loss_pct: pair.stop_loss_pct,
     position_size_pct: pair.position_size_pct,
-    tx_cost_bps: pair.tx_cost_bps,
     leverage: pair.leverage,
+    twap_minutes: pair.twap_minutes,
     schedule_interval: pair.schedule_interval,
     is_enabled: pair.is_enabled,
   });

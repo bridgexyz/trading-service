@@ -102,12 +102,30 @@ async def _run_pair_cycle_once(pair_id: int):
         train_a = data["train_a"]
         train_b = data["train_b"]
 
+        # Build market data summary for logging (includes full close arrays for replay)
+        mkt = {
+            "prices_a": {"count": len(prices_a), "first": str(prices_a.index[0]) if not prices_a.empty else None, "last": str(prices_a.index[-1]) if not prices_a.empty else None, "closes": prices_a.values.tolist()},
+            "prices_b": {"count": len(prices_b), "first": str(prices_b.index[0]) if not prices_b.empty else None, "last": str(prices_b.index[-1]) if not prices_b.empty else None, "closes": prices_b.values.tolist()},
+            "train_a": {"count": len(train_a), "first": str(train_a.index[0]) if not train_a.empty else None, "last": str(train_a.index[-1]) if not train_a.empty else None, "closes": train_a.values.tolist()},
+            "train_b": {"count": len(train_b), "first": str(train_b.index[0]) if not train_b.empty else None, "last": str(train_b.index[-1]) if not train_b.empty else None, "closes": train_b.values.tolist()},
+        }
+
+        if prices_a.empty or prices_b.empty or train_a.empty or train_b.empty:
+            _log_cycle(pair_id, "error", message="Empty candle data from exchange",
+                       market_data=mkt)
+            return
+
         close_a = float(prices_a.iloc[-1])
         close_b = float(prices_b.iloc[-1])
 
         if len(prices_a) < pair.window_candles or len(prices_b) < pair.window_candles:
             _log_cycle(pair_id, "error", message="Insufficient price data",
-                       close_a=close_a, close_b=close_b)
+                       close_a=close_a, close_b=close_b, market_data=mkt)
+            return
+
+        if len(train_a) < pair.train_candles or len(train_b) < pair.train_candles:
+            _log_cycle(pair_id, "error", message="Insufficient training data",
+                       close_a=close_a, close_b=close_b, market_data=mkt)
             return
 
         # Step 2: Compute signals
@@ -134,10 +152,10 @@ async def _run_pair_cycle_once(pair_id: int):
 
         if position is None:
             # FLAT — evaluate entry
-            await _handle_entry(pair, signals, prices_a, prices_b, close_a, close_b)
+            await _handle_entry(pair, signals, prices_a, prices_b, close_a, close_b, mkt)
         else:
             # IN POSITION — evaluate exit
-            await _handle_exit(pair, position, signals, prices_a, prices_b, close_a, close_b)
+            await _handle_exit(pair, position, signals, prices_a, prices_b, close_a, close_b, mkt)
 
     except Exception as e:
         logger.error(f"[{pair_name}] Cycle error: {e}", exc_info=True)
@@ -145,7 +163,26 @@ async def _run_pair_cycle_once(pair_id: int):
         _log_cycle(pair_id, "error", message=str(e))
 
 
-async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float):
+async def _place_pair_order(client, pair, market_index, base_amount, price, is_ask):
+    """Place a market or TWAP order depending on pair config."""
+    if pair.twap_minutes > 0:
+        return await client.place_twap_order(
+            market_index=market_index,
+            base_amount=base_amount,
+            price=price,
+            is_ask=is_ask,
+            duration_minutes=pair.twap_minutes,
+        )
+    return await client.place_order(
+        market_index=market_index,
+        base_amount=base_amount,
+        price=price,
+        is_ask=is_ask,
+        market=True,
+    )
+
+
+async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute entry if conditions are met."""
     # Compute position size from account balance percentage
     lighter_client = await _get_lighter_client()
@@ -190,7 +227,7 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         _log_cycle(
             pair.id, "success", signals=signals, action=action,
             message=f"No entry: {entry.skip_reason}",
-            close_a=close_a, close_b=close_b,
+            close_a=close_a, close_b=close_b, market_data=market_data,
         )
         return
 
@@ -214,19 +251,11 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         size_a = abs(units)
         size_b = abs(units * signals.hedge_ratio)
 
-        result_a = await lighter_client.place_order(
-            market_index=pair.lighter_market_a,
-            base_amount=size_a,
-            price=current_price_a,
-            is_ask=is_ask_a,
-            market=True,
+        result_a = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_a, size_a, current_price_a, is_ask_a
         )
-        result_b = await lighter_client.place_order(
-            market_index=pair.lighter_market_b,
-            base_amount=size_b,
-            price=current_price_b,
-            is_ask=is_ask_b,
-            market=True,
+        result_b = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_b, size_b, current_price_b, is_ask_b
         )
 
         if not result_a.success or not result_b.success:
@@ -293,13 +322,14 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         _notify(f"[{pair.name}] Entry {direction_str} | z={signals.z_score:.3f} | ${entry.notional:.0f}")
         _log_cycle(pair.id, "success", signals=signals, action=direction_str,
                     message=f"Notional: ${entry.notional:.0f}",
-                    close_a=close_a, close_b=close_b)
+                    close_a=close_a, close_b=close_b, market_data=market_data,
+                    order_results=_build_order_results(result_a, result_b))
 
     finally:
         await lighter_client.close()
 
 
-async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, prices_a, prices_b, close_a: float, close_b: float):
+async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute exit if conditions are met."""
     current_price_a = float(prices_a.iloc[-1])
     current_price_b = float(prices_b.iloc[-1])
@@ -324,7 +354,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         _log_cycle(
             pair.id, "success", signals=signals, action="hold",
             message=f"Unrealized: ${exit_sig.unrealized_pnl:.2f} ({exit_sig.unrealized_pct:.2f}%)",
-            close_a=close_a, close_b=close_b,
+            close_a=close_a, close_b=close_b, market_data=market_data,
         )
         return
 
@@ -346,19 +376,11 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         size_a = abs(units)
         size_b = abs(units * position.entry_hedge_ratio)
 
-        result_a = await lighter_client.place_order(
-            market_index=pair.lighter_market_a,
-            base_amount=size_a,
-            price=current_price_a,
-            is_ask=is_ask_a,
-            market=True,
+        result_a = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_a, size_a, current_price_a, is_ask_a
         )
-        result_b = await lighter_client.place_order(
-            market_index=pair.lighter_market_b,
-            base_amount=size_b,
-            price=current_price_b,
-            is_ask=is_ask_b,
-            market=True,
+        result_b = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_b, size_b, current_price_b, is_ask_b
         )
 
         if not result_a.success or not result_b.success:
@@ -392,13 +414,12 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
             return
 
         # Compute PnL
-        tx_cost = pair.tx_cost_bps / 10_000 * position.entry_notional * 2
         if exit_sig.exit_reason == "stop_loss":
-            pnl = -pair.stop_loss_pct / 100 * pair.current_equity - tx_cost
+            pnl = -pair.stop_loss_pct / 100 * pair.current_equity
         else:
             spread_change = (current_price_a - position.entry_hedge_ratio * current_price_b) - position.entry_spread
             spread_units = units
-            pnl = position.direction * spread_change * spread_units - tx_cost
+            pnl = position.direction * spread_change * spread_units
 
         pnl_pct = pnl / pair.current_equity * 100 if pair.current_equity > 0 else 0
 
@@ -453,7 +474,8 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         _notify(f"[{pair.name}] Exit ({exit_sig.exit_reason}) | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
         _log_cycle(pair.id, "success", signals=signals, action=f"exit:{exit_sig.exit_reason}",
                     message=f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)",
-                    close_a=close_a, close_b=close_b)
+                    close_a=close_a, close_b=close_b, market_data=market_data,
+                    order_results=_build_order_results(result_a, result_b))
 
     finally:
         await lighter_client.close()
@@ -529,6 +551,31 @@ async def _get_lighter_client():
         )
 
 
+def _build_order_results(result_a, result_b) -> dict:
+    """Build a dict summarizing order execution results for both legs."""
+    def _order_dict(r):
+        return {
+            "order_id": r.order_id,
+            "success": r.success,
+            "error": r.error,
+            "filled_price": r.filled_price,
+            "filled_amount": r.filled_amount,
+            "order_status": r.order_status,
+            "raw_response": r.raw_response,
+        }
+    return {"leg_a": _order_dict(result_a), "leg_b": _order_dict(result_b)}
+
+
+def _safe_float(v: float | None) -> float | None:
+    """Return None for inf/nan so they don't end up in the DB."""
+    if v is None:
+        return None
+    import math
+    if math.isinf(v) or math.isnan(v):
+        return None
+    return v
+
+
 def _log_cycle(
     pair_id: int,
     status: str,
@@ -537,21 +584,33 @@ def _log_cycle(
     message: str | None = None,
     close_a: float | None = None,
     close_b: float | None = None,
+    market_data: dict | None = None,
+    order_results: dict | None = None,
 ):
     """Write a JobLog entry."""
+    # Merge candle data and order results into a single JSON blob
+    combined_market_data = None
+    if market_data or order_results:
+        combined_market_data = {}
+        if market_data:
+            combined_market_data["candles"] = market_data
+        if order_results:
+            combined_market_data["orders"] = order_results
+
     with Session(engine) as session:
         log = JobLog(
             pair_id=pair_id,
             status=status,
-            z_score=signals.z_score if signals else None,
-            hedge_ratio=signals.hedge_ratio if signals else None,
-            half_life=signals.half_life if signals else None,
+            z_score=_safe_float(signals.z_score) if signals else None,
+            hedge_ratio=_safe_float(signals.hedge_ratio) if signals else None,
+            half_life=_safe_float(signals.half_life) if signals else None,
             adx=None,
-            rsi=signals.rsi if signals else None,
+            rsi=_safe_float(signals.rsi) if signals else None,
             action=action,
-            close_a=close_a,
-            close_b=close_b,
+            close_a=_safe_float(close_a),
+            close_b=_safe_float(close_b),
             message=message,
+            market_data=combined_market_data,
         )
         session.add(log)
         session.commit()

@@ -1,5 +1,7 @@
 """System API — health check, scheduler status, job logs, manual trigger, emergency stop."""
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -48,7 +50,15 @@ def job_logs(
     if status is not None:
         stmt = stmt.where(JobLog.status == status)
     stmt = stmt.offset(offset).limit(limit)
-    return session.exec(stmt).all()
+    rows = session.exec(stmt).all()
+    # Replace inf/nan with None so JSON serialization doesn't blow up.
+    float_fields = ("z_score", "hedge_ratio", "half_life", "adx", "rsi", "close_a", "close_b")
+    for row in rows:
+        for f in float_fields:
+            v = getattr(row, f, None)
+            if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
+                setattr(row, f, None)
+    return rows
 
 
 class EmergencyStopRequest(BaseModel):

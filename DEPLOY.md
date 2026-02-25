@@ -35,9 +35,6 @@ sudo ufw enable
 git clone <your-repo-url> ~/trading-service
 cd ~/trading-service
 
-# Create data directory for SQLite persistence
-mkdir -p data
-
 # Copy example env and edit
 cp .env.example .env
 nano .env
@@ -50,6 +47,7 @@ Set these values in `.env`:
 | `TS_ENCRYPTION_KEY` | Generate: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `TS_JWT_SECRET` | Random string: `openssl rand -hex 32` |
 | `TS_LOG_LEVEL` | `INFO` (or `WARNING` for less noise) |
+| `TS_DB_PASSWORD` | Postgres password (must match docker-compose); default: `trading_secret` |
 | `TS_CORS_ORIGINS` | Set to `[]` — not needed in production (frontend served by FastAPI) |
 | `DOMAIN` | Your domain, e.g. `trading.yourdomain.com` — Caddy auto-provisions HTTPS |
 
@@ -101,20 +99,20 @@ docker compose up -d --build
 ### Database Backup
 
 ```bash
-# Simple copy (briefly stop writes for consistency)
-cp data/trading.db data/trading.db.backup.$(date +%Y%m%d)
+# Dump the full database (no downtime)
+docker compose exec postgres pg_dump -U trading trading > backup_$(date +%Y%m%d).sql
 
-# Or use SQLite online backup (no downtime)
-sqlite3 data/trading.db ".backup 'data/trading.db.backup'"
+# Restore from a dump
+docker compose exec -T postgres psql -U trading trading < backup_20260225.sql
 ```
 
 ### Automated Backups (Cron)
 
 ```bash
-mkdir -p ~/trading-service/data/backups
+mkdir -p ~/trading-service/backups
 crontab -e
 # Add this line for backups every 6 hours:
-# 0 */6 * * * sqlite3 ~/trading-service/data/trading.db ".backup '~/trading-service/data/backups/trading.$(date +\%Y\%m\%d_\%H).db'"
+# 0 */6 * * * cd ~/trading-service && docker compose exec -T postgres pg_dump -U trading trading | gzip > backups/trading.$(date +\%Y\%m\%d_\%H).sql.gz
 ```
 
 ## Key Files
@@ -129,6 +127,7 @@ crontab -e
 ## Important Notes
 
 - **Single worker only**: APScheduler requires exactly 1 Uvicorn worker (configured in Dockerfile CMD).
-- **SQLite is fine** for this single-instance deployment; the volume mount persists data across container rebuilds.
+- **PostgreSQL**: Data is stored in a Docker named volume (`pgdata`). The `pg_dump` commands above handle backups.
 - **CORS origins**: In production the frontend is served from the same origin via FastAPI's `StaticFiles` mount, so CORS is not needed. Set `TS_CORS_ORIGINS=[]`.
 - **Emergency stop**: `POST /api/system/emergency-stop` (authenticated) closes all positions and disables all pairs.
+- **SQLite fallback**: For local development without Docker, set `TS_DATABASE_URL=sqlite:///data/trading.db` in `.env`.

@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    database_url: str = f"sqlite:///{PROJECT_ROOT / 'data' / 'trading.db'}"
+    database_url: str = "postgresql://trading:trading_secret@postgres:5432/trading"
     encryption_key: str = ""  # Fernet key; generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:5173"]  # Vite dev server

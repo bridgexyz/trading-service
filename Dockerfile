@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev && \
+    gcc libffi-dev libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -22,9 +22,6 @@ RUN pip install --no-cache-dir .
 
 # Copy built frontend
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
-
-# Create data directory
-RUN mkdir -p /app/data
 
 EXPOSE 8000
 
