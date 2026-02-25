@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+data/*.db
+.env
+node_modules/
+dist/
+.DS_Store
+.claude/
+market data
+plan/
