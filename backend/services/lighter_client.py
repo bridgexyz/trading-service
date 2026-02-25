@@ -320,14 +320,15 @@ class LighterClient:
         positions = []
         raw_positions = getattr(account, "positions", None) or []
         for pos in raw_positions:
-            size = float(getattr(pos, "size", 0))
+            size = float(getattr(pos, "position", 0))
             if abs(size) < 1e-10:
                 continue
+            sign = int(getattr(pos, "sign", 1))
             positions.append({
-                "market_index": int(getattr(pos, "market_index", 0)),
-                "side": "long" if size > 0 else "short",
+                "market_index": int(getattr(pos, "market_id", 0)),
+                "side": "long" if sign >= 0 else "short",
                 "size": abs(size),
-                "entry_price": float(getattr(pos, "entry_price", 0)),
+                "entry_price": float(getattr(pos, "avg_entry_price", 0)),
             })
         return positions
 
