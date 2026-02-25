@@ -377,11 +377,26 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         size_a = abs(units)
         size_b = abs(units * position.entry_hedge_ratio)
 
-        result_a = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_a, size_a, current_price_a, is_ask_a
+        # Always use TWAP for exits (reduce 100% of position)
+        # Worst price with 5% slippage tolerance for TWAP slices to fill
+        SLIPPAGE = 0.01
+        worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
+        worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
+
+        exit_twap_minutes = pair.twap_minutes if pair.twap_minutes > 0 else 5
+        result_a = await lighter_client.place_twap_order(
+            market_index=pair.lighter_market_a,
+            base_amount=size_a,
+            price=worst_price_a,
+            is_ask=is_ask_a,
+            duration_minutes=exit_twap_minutes,
         )
-        result_b = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_b, size_b, current_price_b, is_ask_b
+        result_b = await lighter_client.place_twap_order(
+            market_index=pair.lighter_market_b,
+            base_amount=size_b,
+            price=worst_price_b,
+            is_ask=is_ask_b,
+            duration_minutes=exit_twap_minutes,
         )
 
         if not result_a.success or not result_b.success:
