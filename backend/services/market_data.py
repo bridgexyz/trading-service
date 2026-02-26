@@ -64,6 +64,12 @@ async def fetch_candles(
         return pd.Series(dtype=float)
 
 
+async def _get_api_client():
+    """Create a Lighter ApiClient (used for orderbook/markets)."""
+    import lighter
+    return lighter.ApiClient()
+
+
 async def fetch_orderbook(market_id: int) -> dict:
     """Fetch current orderbook for a market.
 
