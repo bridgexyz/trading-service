@@ -69,7 +69,7 @@ async def _run_pair_cycle_once(pair_id: int):
 
     Steps:
     1. Load pair config and credential
-    2. Fetch market data from Lighter
+    2. Fetch market data from Hyperliquid
     3. Compute signals (z-score, hedge ratio, regime filters)
     4. If flat: evaluate entry → place orders
     5. If in position: evaluate exit → close position
@@ -89,8 +89,8 @@ async def _run_pair_cycle_once(pair_id: int):
         from backend.services.market_data import fetch_pair_data
 
         data = await fetch_pair_data(
-            market_a=pair.lighter_market_a,
-            market_b=pair.lighter_market_b,
+            asset_a=pair.asset_a,
+            asset_b=pair.asset_b,
             window_interval=pair.window_interval,
             window_candles=pair.window_candles,
             train_interval=pair.train_interval,

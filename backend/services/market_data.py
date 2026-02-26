@@ -1,6 +1,7 @@
-"""Market data fetching from Lighter DEX.
+"""Market data fetching.
 
-Uses the Lighter CandlestickApi and OrderApi for all market data.
+Candle data comes from Hyperliquid (supports all intervals including 8h).
+Orderbook and market listing still use Lighter.
 """
 
 import logging
@@ -8,63 +9,59 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
+from hyperliquid.info import Info
 
 logger = logging.getLogger(__name__)
 
+# Reusable Hyperliquid Info client (no auth needed for public data)
+_hl_info = Info(skip_ws=True)
 
-async def _get_api_client():
-    """Create a Lighter ApiClient."""
-    import lighter
-    return lighter.ApiClient()
+
+def _to_hl_ticker(asset: str) -> str:
+    """Convert asset name to Hyperliquid ticker format.
+
+    Hyperliquid uses 'kX' instead of '1000X' (e.g. kBONK, kPEPE).
+    """
+    if asset.startswith("1000"):
+        return "k" + asset[4:]
+    return asset
 
 
 async def fetch_candles(
-    market_id: int,
+    ticker: str,
     resolution: str,
     candles_needed: int,
 ) -> pd.Series:
-    """Fetch close price series from Lighter CandlestickApi.
+    """Fetch close price series from Hyperliquid.
 
     Args:
-        market_id: Lighter market index.
-        resolution: Candle interval (e.g. "1h", "4h", "1d").
+        ticker: Asset ticker (e.g. "SOL", "1000BONK").
+        resolution: Candle interval (e.g. "1h", "4h", "8h").
         candles_needed: Number of candles to fetch.
 
     Returns:
         pd.Series of close prices with datetime index.
     """
-    import lighter
-    from lighter.api import CandlestickApi
+    import asyncio
 
-    # Calculate time range
+    hl_ticker = _to_hl_ticker(ticker)
     interval_seconds = _resolution_to_seconds(resolution)
     now = datetime.now(timezone.utc)
     buffer_candles = int(candles_needed * 1.2)  # 20% buffer
     start_time = now - timedelta(seconds=buffer_candles * interval_seconds)
 
-    start_ts = int(start_time.timestamp())
-    end_ts = int(now.timestamp())
+    start_ms = int(start_time.timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
 
-    client = await _get_api_client()
     try:
-        api = CandlestickApi(client)
-        # Use _with_http_info to get raw JSON — the SDK model drops
-        # lowercase OHLC keys due to an alias mismatch bug.
-        resp = await api.candles_with_http_info(
-            market_id=market_id,
-            resolution=resolution,
-            start_timestamp=start_ts,
-            end_timestamp=end_ts,
-            count_back=buffer_candles,
+        # candles_snapshot is synchronous — run in executor to avoid blocking
+        candles = await asyncio.get_event_loop().run_in_executor(
+            None, _hl_info.candles_snapshot, hl_ticker, resolution, start_ms, end_ms
         )
-        import json
-        raw = json.loads(resp.raw_data)
-        return _parse_candles(raw)
+        return _parse_candles(candles)
     except Exception as e:
-        logger.error(f"Error fetching candles for market {market_id}: {e}")
+        logger.error(f"Error fetching candles for {ticker} ({hl_ticker}): {e}")
         return pd.Series(dtype=float)
-    finally:
-        await client.close()
 
 
 async def fetch_orderbook(market_id: int) -> dict:
@@ -105,8 +102,8 @@ async def fetch_markets() -> list[dict]:
 
 
 async def fetch_pair_data(
-    market_a: int,
-    market_b: int,
+    asset_a: str,
+    asset_b: str,
     window_interval: str,
     window_candles: int,
     train_interval: str,
@@ -114,21 +111,21 @@ async def fetch_pair_data(
 ) -> dict[str, pd.Series]:
     """Fetch all price data needed for signal computation.
 
-    Uses Lighter market indices instead of Hyperliquid tickers.
+    Uses asset ticker names via Hyperliquid.
     Returns dict with keys: 'prices_a', 'prices_b', 'train_a', 'train_b'.
     """
     import asyncio
 
     # Fetch trading-interval data for both assets
     tasks = [
-        fetch_candles(market_a, window_interval, window_candles),
-        fetch_candles(market_b, window_interval, window_candles),
+        fetch_candles(asset_a, window_interval, window_candles),
+        fetch_candles(asset_b, window_interval, window_candles),
     ]
 
     # If training interval differs, fetch separately
     if train_interval != window_interval:
-        tasks.append(fetch_candles(market_a, train_interval, train_candles))
-        tasks.append(fetch_candles(market_b, train_interval, train_candles))
+        tasks.append(fetch_candles(asset_a, train_interval, train_candles))
+        tasks.append(fetch_candles(asset_b, train_interval, train_candles))
 
     results = await asyncio.gather(*tasks)
 
@@ -166,16 +163,13 @@ def _resolution_to_seconds(resolution: str) -> int:
     return mapping.get(resolution, 14400)
 
 
-def _parse_candles(result) -> pd.Series:
-    """Parse Lighter candle response (raw JSON dict) into a close price Series.
+def _parse_candles(candles: list[dict]) -> pd.Series:
+    """Parse Hyperliquid candles_snapshot response into a close price Series.
 
-    The raw JSON looks like:
-        {"code": 200, "r": "4h", "c": [{"t": 17706..., "o": 0.006, ... "c": 0.006}, ...]}
-    Timestamps are in milliseconds.
+    Each candle dict: {"t": 1772092800000, "s": "SOL", "i": "8h",
+                       "o": "87.212", "c": "87.498", "h": "87.811", "l": "87.212", ...}
     """
     try:
-        # result is a raw dict parsed from JSON
-        candles = result.get("c", []) if isinstance(result, dict) else []
         if not candles:
             return pd.Series(dtype=float)
 
