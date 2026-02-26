@@ -122,32 +122,35 @@ async def fetch_pair_data(
     """
     import asyncio
 
-    # Fetch trading-interval data for both assets
-    tasks = [
-        fetch_candles(asset_a, window_interval, window_candles),
-        fetch_candles(asset_b, window_interval, window_candles),
-    ]
-
-    # If training interval differs, fetch separately
     if train_interval != window_interval:
-        tasks.append(fetch_candles(asset_a, train_interval, train_candles))
-        tasks.append(fetch_candles(asset_b, train_interval, train_candles))
-
-    results = await asyncio.gather(*tasks)
-
-    data = {
-        "prices_a": results[0],
-        "prices_b": results[1],
-    }
-
-    if train_interval != window_interval:
-        data["train_a"] = results[2]
-        data["train_b"] = results[3]
+        # Different intervals — fetch window and training data separately
+        tasks = [
+            fetch_candles(asset_a, window_interval, window_candles),
+            fetch_candles(asset_b, window_interval, window_candles),
+            fetch_candles(asset_a, train_interval, train_candles),
+            fetch_candles(asset_b, train_interval, train_candles),
+        ]
+        results = await asyncio.gather(*tasks)
+        return {
+            "prices_a": results[0],
+            "prices_b": results[1],
+            "train_a": results[2],
+            "train_b": results[3],
+        }
     else:
-        data["train_a"] = results[0]
-        data["train_b"] = results[1]
-
-    return data
+        # Same interval — fetch once with enough candles for both
+        needed = max(window_candles, train_candles)
+        tasks = [
+            fetch_candles(asset_a, window_interval, needed),
+            fetch_candles(asset_b, window_interval, needed),
+        ]
+        results = await asyncio.gather(*tasks)
+        return {
+            "prices_a": results[0],
+            "prices_b": results[1],
+            "train_a": results[0],
+            "train_b": results[1],
+        }
 
 
 # ---------------------------------------------------------------------------
