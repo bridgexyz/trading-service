@@ -152,6 +152,7 @@ class LighterClient:
                     is_ask=is_ask,
                     order_type=1,       # MARKET
                     time_in_force=0,    # IMMEDIATE_OR_CANCEL
+                    order_expiry=0,     # SDK DEFAULT_IOC_EXPIRY
                     reduce_only=reduce_only,
                 )
             else:
