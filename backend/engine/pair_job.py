@@ -163,15 +163,17 @@ async def _run_pair_cycle_once(pair_id: int):
         _log_cycle(pair_id, "error", message=str(e))
 
 
-async def _place_pair_order(client, pair, market_index, base_amount, price, is_ask):
+async def _place_pair_order(client, pair, market_index, base_amount, price, is_ask, reduce_only=False):
     """Place a market or TWAP order depending on pair config."""
-    if pair.twap_minutes > 0:
+    order_mode = getattr(pair, "order_mode", "market")
+    if order_mode == "twap":
         return await client.place_twap_order(
             market_index=market_index,
             base_amount=base_amount,
             price=price,
             is_ask=is_ask,
             duration_minutes=pair.twap_minutes,
+            reduce_only=reduce_only,
         )
     return await client.place_order(
         market_index=market_index,
@@ -179,6 +181,7 @@ async def _place_pair_order(client, pair, market_index, base_amount, price, is_a
         price=price,
         is_ask=is_ask,
         market=True,
+        reduce_only=reduce_only,
     )
 
 
@@ -271,7 +274,8 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
 
         # Verify positions actually exist on the exchange
         # (skip for TWAP — slices fill over minutes, not immediately)
-        if pair.twap_minutes == 0:
+        order_mode = getattr(pair, "order_mode", "market")
+        if order_mode == "market":
             await asyncio.sleep(1)  # Brief delay for exchange settlement
 
             exchange_positions = await lighter_client.get_positions()
@@ -367,36 +371,45 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         return
 
     try:
+        # Calculate fallback sizes from entry notional
         dollar_per_unit = position.entry_price_a + abs(position.entry_hedge_ratio) * position.entry_price_b
         units = position.entry_notional / dollar_per_unit if dollar_per_unit > 0 else 0
+        fallback_size_a = abs(units)
+        fallback_size_b = abs(units * position.entry_hedge_ratio)
+
+        # Fetch actual position sizes from exchange
+        exchange_positions = await lighter_client.get_positions()
+        exchange_by_market = {p["market_index"]: p for p in exchange_positions}
+
+        pos_a = exchange_by_market.get(pair.lighter_market_a)
+        pos_b = exchange_by_market.get(pair.lighter_market_b)
+        size_a = pos_a["size"] if pos_a else fallback_size_a
+        size_b = pos_b["size"] if pos_b else fallback_size_b
+
+        if pos_a:
+            logger.info(f"[{pair.name}] Exit leg A: using exchange size {size_a:.6f}")
+        else:
+            logger.warning(f"[{pair.name}] Exit leg A: no exchange position, using calculated size {size_a:.6f}")
+        if pos_b:
+            logger.info(f"[{pair.name}] Exit leg B: using exchange size {size_b:.6f}")
+        else:
+            logger.warning(f"[{pair.name}] Exit leg B: no exchange position, using calculated size {size_b:.6f}")
 
         # Reverse directions for close
         is_ask_a = position.direction == 1   # was buy A, now sell A
         is_ask_b = position.direction == -1  # was sell B, now buy B
 
-        size_a = abs(units)
-        size_b = abs(units * position.entry_hedge_ratio)
-
-        # Always use TWAP for exits (reduce 100% of position)
-        # Worst price with 5% slippage tolerance for TWAP slices to fill
+        # Worst price with slippage tolerance
         SLIPPAGE = 0.01
         worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
         worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
 
-        exit_twap_minutes = pair.twap_minutes if pair.twap_minutes > 0 else 5
-        result_a = await lighter_client.place_twap_order(
-            market_index=pair.lighter_market_a,
-            base_amount=size_a,
-            price=worst_price_a,
-            is_ask=is_ask_a,
-            duration_minutes=exit_twap_minutes,
+        # Place exit orders based on order_mode with reduce_only
+        result_a = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
         )
-        result_b = await lighter_client.place_twap_order(
-            market_index=pair.lighter_market_b,
-            base_amount=size_b,
-            price=worst_price_b,
-            is_ask=is_ask_b,
-            duration_minutes=exit_twap_minutes,
+        result_b = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
         )
 
         if not result_a.success or not result_b.success:
@@ -411,7 +424,8 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
 
         # Verify positions are actually closed on the exchange
         # (skip for TWAP — slices close over minutes, not immediately)
-        if pair.twap_minutes == 0:
+        order_mode = getattr(pair, "order_mode", "market")
+        if order_mode == "market":
             await asyncio.sleep(1)  # Brief delay for exchange settlement
 
             exchange_positions = await lighter_client.get_positions()

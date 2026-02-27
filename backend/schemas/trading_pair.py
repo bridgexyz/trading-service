@@ -1,6 +1,7 @@
 """Pydantic schemas for TradingPair API."""
 
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.utils.constants import VALID_INTERVALS
@@ -27,6 +28,7 @@ class TradingPairCreate(BaseModel):
     position_size_pct: float = Field(default=50.0, gt=0, le=100)
     leverage: float = Field(default=5.0, gt=0)
     twap_minutes: int = Field(default=0, ge=0)
+    order_mode: Literal["market", "twap"] = "market"
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
     schedule_interval: str = "15m"
     is_enabled: bool = True
@@ -88,6 +90,7 @@ class TradingPairUpdate(BaseModel):
     position_size_pct: float | None = Field(default=None, gt=0, le=100)
     leverage: float | None = Field(default=None, gt=0)
     twap_minutes: int | None = Field(default=None, ge=0)
+    order_mode: Literal["market", "twap"] | None = None
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
     schedule_interval: str | None = None
     is_enabled: bool | None = None
@@ -164,6 +167,7 @@ class TradingPairRead(BaseModel):
     position_size_pct: float
     leverage: float
     twap_minutes: int
+    order_mode: str
     min_equity_pct: float
     schedule_interval: str
     is_enabled: bool

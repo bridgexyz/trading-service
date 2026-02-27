@@ -31,6 +31,7 @@ const defaultPair = {
   position_size_pct: 50,
   leverage: 5,
   twap_minutes: 0,
+  order_mode: "market" as "market" | "twap",
   schedule_interval: 10,
   is_enabled: true,
 };
@@ -252,8 +253,11 @@ function PairForm({
       <div className="flex flex-wrap gap-3">
         <Field label="Stop Loss %" value={form.stop_loss_pct} onChange={(v) => set("stop_loss_pct", v)} />
         <Field label="Position Size (%)" value={form.position_size_pct} onChange={(v) => set("position_size_pct", v)} />
-<Field label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} />
-        <Field label="TWAP (min)" value={form.twap_minutes} onChange={(v) => set("twap_minutes", v)} />
+        <Field label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} />
+        <SelectField label="Order Mode" value={form.order_mode as string} onChange={(v) => set("order_mode", v)} options={["market", "twap"]} />
+        {form.order_mode === "twap" && (
+          <Field label="TWAP (min)" value={form.twap_minutes} onChange={(v) => set("twap_minutes", v)} />
+        )}
       </div>
 
       <SectionLabel>Schedule</SectionLabel>
@@ -367,6 +371,7 @@ export default function PairsPage() {
     position_size_pct: pair.position_size_pct,
     leverage: pair.leverage,
     twap_minutes: pair.twap_minutes,
+    order_mode: (pair.order_mode || "market") as "market" | "twap",
     schedule_interval: parseInt(pair.schedule_interval) || 10,
     is_enabled: pair.is_enabled,
   });

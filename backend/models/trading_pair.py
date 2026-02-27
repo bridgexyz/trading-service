@@ -38,6 +38,7 @@ class TradingPair(SQLModel, table=True):
     tx_cost_bps: float = 0.0
     leverage: float = 5.0
     twap_minutes: int = 0
+    order_mode: str = "market"  # "market" or "twap"
     min_equity_pct: float = 40.0
 
     # Scheduling

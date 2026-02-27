@@ -118,7 +118,9 @@ async def test_place_twap_order_calls_create_order_with_type_6():
     call_kwargs = client._signer_client.create_order.call_args.kwargs
     assert call_kwargs["order_type"] == 6
     assert call_kwargs["time_in_force"] == 1
-    assert call_kwargs["order_expiry"] == 300  # 5 * 60
+    # order_expiry is a millisecond timestamp ~5 min from now
+    assert call_kwargs["order_expiry"] > 0
+    assert call_kwargs["reduce_only"] is False
 
 
 @pytest.mark.asyncio
@@ -183,13 +185,13 @@ async def test_place_pair_order_routes_to_twap():
     client = AsyncMock(spec=LighterClient)
     client.place_twap_order.return_value = OrderResult(success=True, order_id="twap-1")
 
-    pair = TradingPair(name="A-B", asset_a="A", asset_b="B", twap_minutes=5)
+    pair = TradingPair(name="A-B", asset_a="A", asset_b="B", twap_minutes=5, order_mode="twap")
 
     result = await _place_pair_order(client, pair, market_index=1, base_amount=1.0, price=100.0, is_ask=False)
 
     client.place_twap_order.assert_called_once_with(
         market_index=1, base_amount=1.0, price=100.0,
-        is_ask=False, duration_minutes=5,
+        is_ask=False, duration_minutes=5, reduce_only=False,
     )
     client.place_order.assert_not_called()
     assert result.order_id == "twap-1"
@@ -202,13 +204,13 @@ async def test_place_pair_order_routes_to_market():
     client = AsyncMock(spec=LighterClient)
     client.place_order.return_value = OrderResult(success=True, order_id="mkt-1")
 
-    pair = TradingPair(name="A-B", asset_a="A", asset_b="B", twap_minutes=0)
+    pair = TradingPair(name="A-B", asset_a="A", asset_b="B", twap_minutes=0, order_mode="market")
 
     result = await _place_pair_order(client, pair, market_index=1, base_amount=1.0, price=100.0, is_ask=True)
 
     client.place_order.assert_called_once_with(
         market_index=1, base_amount=1.0, price=100.0,
-        is_ask=True, market=True,
+        is_ask=True, market=True, reduce_only=False,
     )
     client.place_twap_order.assert_not_called()
     assert result.order_id == "mkt-1"

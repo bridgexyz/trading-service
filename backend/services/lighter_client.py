@@ -109,6 +109,7 @@ class LighterClient:
         is_ask: bool,
         client_order_index: int | None = None,
         market: bool = False,
+        reduce_only: bool = False,
     ) -> OrderResult:
         """Place an order on Lighter.
 
@@ -152,6 +153,7 @@ class LighterClient:
                     order_type=1,       # MARKET
                     time_in_force=0,    # IMMEDIATE_OR_CANCEL
                     order_expiry=int((time.time() + 60) * 1000),  # 1 minute
+                    reduce_only=reduce_only,
                 )
             else:
                 order, resp, error = await self._signer_client.create_order(
@@ -163,6 +165,7 @@ class LighterClient:
                     order_type=0,       # LIMIT
                     time_in_force=1,    # GOOD_TILL_TIME
                     order_expiry=int((time.time() + 60 * 60) * 1000),  # 1 hour
+                    reduce_only=reduce_only,
                 )
             if error is not None:
                 logger.error(f"Order rejected: {error}")
@@ -192,6 +195,7 @@ class LighterClient:
         is_ask: bool,
         duration_minutes: int,
         client_order_index: int | None = None,
+        reduce_only: bool = False,
     ) -> OrderResult:
         """Place a TWAP order on Lighter.
 
@@ -239,6 +243,7 @@ class LighterClient:
                 order_type=6,           # TWAP
                 time_in_force=1,        # GOOD_TILL_TIME
                 order_expiry=int((time.time() + effective_duration * 60) * 1000),
+                reduce_only=reduce_only,
             )
             if error is not None:
                 logger.error(f"TWAP order rejected: {error}")

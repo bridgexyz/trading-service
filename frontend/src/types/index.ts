@@ -20,6 +20,7 @@ export interface TradingPair {
   position_size_pct: number;
   leverage: number;
   twap_minutes: number;
+  order_mode: string;
   min_equity_pct: number;
   schedule_interval: string;
   is_enabled: boolean;
