@@ -152,7 +152,6 @@ class LighterClient:
                     is_ask=is_ask,
                     order_type=1,       # MARKET
                     time_in_force=0,    # IMMEDIATE_OR_CANCEL
-                    order_expiry=int((time.time() + 60) * 1000),  # 1 minute
                     reduce_only=reduce_only,
                 )
             else:
@@ -164,7 +163,6 @@ class LighterClient:
                     is_ask=is_ask,
                     order_type=0,       # LIMIT
                     time_in_force=1,    # GOOD_TILL_TIME
-                    order_expiry=int((time.time() + 60 * 60) * 1000),  # 1 hour
                     reduce_only=reduce_only,
                 )
             if error is not None:
