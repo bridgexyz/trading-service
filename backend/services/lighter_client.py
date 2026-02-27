@@ -228,6 +228,8 @@ class LighterClient:
                 f"duration={duration_minutes}min"
             )
 
+            # Lighter enforces a minimum 5-minute TWAP duration
+            effective_duration = max(duration_minutes, 5)
             order, resp, error = await self._signer_client.create_order(
                 market_index=market_index,
                 client_order_index=client_order_index,
@@ -236,7 +238,7 @@ class LighterClient:
                 is_ask=is_ask,
                 order_type=6,           # TWAP
                 time_in_force=1,        # GOOD_TILL_TIME
-                order_expiry=int((time.time() + duration_minutes * 60) * 1000),
+                order_expiry=int((time.time() + effective_duration * 60) * 1000),
             )
             if error is not None:
                 logger.error(f"TWAP order rejected: {error}")
