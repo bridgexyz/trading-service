@@ -21,6 +21,8 @@ export interface TradingPair {
   leverage: number;
   twap_minutes: number;
   order_mode: string;
+  slice_chunks: number;
+  slice_delay_sec: number;
   min_equity_pct: number;
   schedule_interval: string;
   is_enabled: boolean;

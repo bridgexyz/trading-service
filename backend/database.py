@@ -40,6 +40,18 @@ def _run_migrations():
             )
             conn.commit()
 
+    # Add slice_chunks and slice_delay_sec columns for sliced order mode
+    if "slice_chunks" not in columns:
+        logger.info("Migrating: adding slice_chunks column")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN slice_chunks INTEGER NOT NULL DEFAULT 10"))
+            conn.commit()
+    if "slice_delay_sec" not in columns:
+        logger.info("Migrating: adding slice_delay_sec column")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN slice_delay_sec REAL NOT NULL DEFAULT 2.0"))
+            conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

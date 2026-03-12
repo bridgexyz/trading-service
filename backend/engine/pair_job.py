@@ -95,6 +95,8 @@ async def _run_pair_cycle_once(pair_id: int):
             window_candles=pair.window_candles,
             train_interval=pair.train_interval,
             train_candles=pair.train_candles,
+            market_id_a=pair.lighter_market_a or None,
+            market_id_b=pair.lighter_market_b or None,
         )
 
         prices_a = data["prices_a"]
@@ -185,6 +187,80 @@ async def _place_pair_order(client, pair, market_index, base_amount, price, is_a
     )
 
 
+async def _execute_sliced_orders(
+    client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=False
+):
+    """Execute an order in N smaller chunks with delays between each.
+
+    Returns (last_result_a, last_result_b, completed_chunks).
+    """
+    from backend.services.market_data import fetch_orderbook
+
+    chunk_size_a = size_a / pair.slice_chunks
+    chunk_size_b = size_b / pair.slice_chunks
+
+    last_result_a = None
+    last_result_b = None
+    completed = 0
+
+    for i in range(pair.slice_chunks):
+        # Fetch fresh orderbook mid-prices for slippage calculation
+        ob_a, ob_b = await asyncio.gather(
+            fetch_orderbook(pair.lighter_market_a),
+            fetch_orderbook(pair.lighter_market_b),
+        )
+        mid_a = ob_a["mid_price"]
+        mid_b = ob_b["mid_price"]
+
+        if mid_a <= 0 or mid_b <= 0:
+            logger.error(f"[{pair.name}] Sliced chunk {i+1}: invalid mid prices (A={mid_a}, B={mid_b}), stopping")
+            break
+
+        SLIPPAGE = 0.01
+        worst_a = mid_a * (1 - SLIPPAGE) if is_ask_a else mid_a * (1 + SLIPPAGE)
+        worst_b = mid_b * (1 - SLIPPAGE) if is_ask_b else mid_b * (1 + SLIPPAGE)
+
+        result_a = await client.place_order(
+            market_index=pair.lighter_market_a,
+            base_amount=chunk_size_a,
+            price=worst_a,
+            is_ask=is_ask_a,
+            market=True,
+            reduce_only=reduce_only,
+        )
+
+        if not result_a.success:
+            logger.error(f"[{pair.name}] Sliced chunk {i+1} leg A failed: {result_a.error}")
+            break
+
+        result_b = await client.place_order(
+            market_index=pair.lighter_market_b,
+            base_amount=chunk_size_b,
+            price=worst_b,
+            is_ask=is_ask_b,
+            market=True,
+            reduce_only=reduce_only,
+        )
+
+        if not result_b.success:
+            # Leg A succeeded but leg B failed — rollback this chunk's leg A
+            logger.warning(f"[{pair.name}] Sliced chunk {i+1} leg B failed, rolling back leg A")
+            await client.cancel_order(
+                market_index=pair.lighter_market_a, order_id=result_a.order_id
+            )
+            break
+
+        last_result_a = result_a
+        last_result_b = result_b
+        completed += 1
+        logger.info(f"[{pair.name}] Sliced chunk {completed}/{pair.slice_chunks} complete")
+
+        if i < pair.slice_chunks - 1:
+            await asyncio.sleep(pair.slice_delay_sec)
+
+    return last_result_a, last_result_b, completed
+
+
 async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute entry if conditions are met."""
     # Compute position size from account balance percentage
@@ -254,34 +330,57 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         size_a = abs(units)
         size_b = abs(units * signals.hedge_ratio)
 
-        # Worst price with slippage tolerance for IOC market orders
-        SLIPPAGE = 0.01
-        worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
-        worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
+        order_mode = getattr(pair, "order_mode", "market")
 
-        result_a = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a
-        )
-        result_b = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b
-        )
-
-        if not result_a.success or not result_b.success:
-            err = result_a.error or result_b.error
-            # Cancel the successful leg to avoid orphaned single-sided position
-            await _rollback_partial_fill(
-                lighter_client, pair, result_a, result_b, "entry", signals
+        if order_mode == "sliced":
+            result_a, result_b, completed_chunks = await _execute_sliced_orders(
+                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
             )
-            _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
-                        message=f"Order failed (rolled back): {err}",
-                        close_a=close_a, close_b=close_b)
-            return
+            if completed_chunks == 0:
+                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                           message="Sliced entry: 0 chunks completed",
+                           close_a=close_a, close_b=close_b)
+                return
+            if completed_chunks < pair.slice_chunks:
+                # Partial fill — scale down notional proportionally
+                entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
+                logger.warning(
+                    f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks, "
+                    f"notional reduced to ${entry.notional:.0f}"
+                )
+                _notify(
+                    f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks. "
+                    f"Notional: ${entry.notional:.0f}"
+                )
+        else:
+            # Worst price with slippage tolerance for IOC market orders
+            SLIPPAGE = 0.01
+            worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
+            worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
+
+            result_a = await _place_pair_order(
+                lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a
+            )
+            result_b = await _place_pair_order(
+                lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b
+            )
+
+            if not result_a.success or not result_b.success:
+                err = result_a.error or result_b.error
+                # Cancel the successful leg to avoid orphaned single-sided position
+                await _rollback_partial_fill(
+                    lighter_client, pair, result_a, result_b, "entry", signals
+                )
+                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                            message=f"Order failed (rolled back): {err}",
+                            close_a=close_a, close_b=close_b)
+                return
 
         # Verify positions actually exist on the exchange
         # (skip for TWAP — slices fill over minutes, not immediately)
-        order_mode = getattr(pair, "order_mode", "market")
-        if order_mode == "market":
-            await asyncio.sleep(1)  # Brief delay for exchange settlement
+        if order_mode in ("market", "sliced"):
+            settle_delay = 2 if order_mode == "sliced" else 1
+            await asyncio.sleep(settle_delay)
 
             exchange_positions = await lighter_client.get_positions()
             exchange_markets = {p["market_index"] for p in exchange_positions}
@@ -404,34 +503,59 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         is_ask_a = position.direction == 1   # was buy A, now sell A
         is_ask_b = position.direction == -1  # was sell B, now buy B
 
-        # Worst price with slippage tolerance
-        SLIPPAGE = 0.01
-        worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
-        worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
+        order_mode = getattr(pair, "order_mode", "market")
 
-        # Place exit orders based on order_mode with reduce_only
-        result_a = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
-        )
-        result_b = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
-        )
-
-        if not result_a.success or not result_b.success:
-            err = result_a.error or result_b.error
-            await _rollback_partial_fill(
-                lighter_client, pair, result_a, result_b, "exit", signals
+        if order_mode == "sliced":
+            result_a, result_b, completed_chunks = await _execute_sliced_orders(
+                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
             )
-            _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
-                        message=f"Close order failed (rolled back): {err}",
-                        close_a=close_a, close_b=close_b)
-            return
+            if completed_chunks == 0:
+                _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                           message="Sliced exit: 0 chunks completed",
+                           close_a=close_a, close_b=close_b)
+                return
+            if completed_chunks < pair.slice_chunks:
+                # Partial exit — don't delete position; next cycle re-reads exchange sizes
+                logger.warning(
+                    f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks"
+                )
+                _notify(
+                    f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks. "
+                    f"Remaining position will be closed next cycle."
+                )
+                _log_cycle(pair.id, "error", signals=signals, action="exit_partial",
+                           message=f"Sliced exit partial: {completed_chunks}/{pair.slice_chunks} chunks",
+                           close_a=close_a, close_b=close_b)
+                return
+        else:
+            # Worst price with slippage tolerance
+            SLIPPAGE = 0.01
+            worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
+            worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
+
+            # Place exit orders based on order_mode with reduce_only
+            result_a = await _place_pair_order(
+                lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
+            )
+            result_b = await _place_pair_order(
+                lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
+            )
+
+            if not result_a.success or not result_b.success:
+                err = result_a.error or result_b.error
+                await _rollback_partial_fill(
+                    lighter_client, pair, result_a, result_b, "exit", signals
+                )
+                _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                            message=f"Close order failed (rolled back): {err}",
+                            close_a=close_a, close_b=close_b)
+                return
 
         # Verify positions are actually closed on the exchange
         # (skip for TWAP — slices close over minutes, not immediately)
-        order_mode = getattr(pair, "order_mode", "market")
-        if order_mode == "market":
-            await asyncio.sleep(1)  # Brief delay for exchange settlement
+        if order_mode in ("market", "sliced"):
+            settle_delay = 2 if order_mode == "sliced" else 1
+            await asyncio.sleep(settle_delay)
 
             exchange_positions = await lighter_client.get_positions()
             exchange_markets = {p["market_index"] for p in exchange_positions}

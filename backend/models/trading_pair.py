@@ -38,7 +38,9 @@ class TradingPair(SQLModel, table=True):
     tx_cost_bps: float = 0.0
     leverage: float = 5.0
     twap_minutes: int = 0
-    order_mode: str = "market"  # "market" or "twap"
+    order_mode: str = "market"  # "market", "twap", or "sliced"
+    slice_chunks: int = 10  # number of sub-orders for sliced mode
+    slice_delay_sec: float = 2.0  # delay between chunk iterations (seconds)
     min_equity_pct: float = 40.0
 
     # Scheduling

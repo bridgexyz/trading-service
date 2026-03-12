@@ -1,6 +1,7 @@
 """Market data fetching.
 
-Candle data comes from Hyperliquid (supports all intervals including 8h).
+Short-interval candle data (≤1h) comes from Lighter DEX when market_id is available.
+Longer intervals (2h, 4h, 8h, etc.) use Hyperliquid.
 Orderbook and market listing still use Lighter.
 """
 
@@ -11,10 +12,15 @@ import numpy as np
 import pandas as pd
 from hyperliquid.info import Info
 
+from backend.utils.constants import LIGHTER_CANDLE_INTERVALS
+
 logger = logging.getLogger(__name__)
 
 # Reusable Hyperliquid Info client (no auth needed for public data)
 _hl_info = Info(skip_ws=True)
+
+# Cached Lighter ApiClient for candle data (no auth needed)
+_lighter_candle_client = None
 
 
 def _to_hl_ticker(asset: str) -> str:
@@ -27,21 +33,94 @@ def _to_hl_ticker(asset: str) -> str:
     return asset
 
 
-async def fetch_candles(
-    ticker: str,
+def _get_lighter_candle_client():
+    """Get or create a reusable Lighter ApiClient for candle data."""
+    global _lighter_candle_client
+    if _lighter_candle_client is None:
+        import lighter
+        _lighter_candle_client = lighter.ApiClient()
+    return _lighter_candle_client
+
+
+async def fetch_candles_lighter(
+    market_id: int,
     resolution: str,
     candles_needed: int,
 ) -> pd.Series:
-    """Fetch close price series from Hyperliquid.
+    """Fetch close price series from Lighter DEX.
+
+    Uses CandlestickApi with raw JSON parsing to avoid SDK Candle model
+    field alias collision (c/C).
 
     Args:
-        ticker: Asset ticker (e.g. "SOL", "1000BONK").
-        resolution: Candle interval (e.g. "1h", "4h", "8h").
+        market_id: Lighter market ID (integer).
+        resolution: Candle interval (e.g. "15m", "1h").
         candles_needed: Number of candles to fetch.
 
     Returns:
         pd.Series of close prices with datetime index.
     """
+    from lighter.api import CandlestickApi
+
+    client = _get_lighter_candle_client()
+    interval_seconds = _resolution_to_seconds(resolution)
+    now = datetime.now(timezone.utc)
+    buffer_candles = int(candles_needed * 1.2)
+    start_time = now - timedelta(seconds=buffer_candles * interval_seconds)
+
+    start_ms = int(start_time.timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
+
+    try:
+        api = CandlestickApi(client)
+        # Use _without_preload_content to get raw response and parse JSON
+        # manually, avoiding the SDK Candle model bug where field 'c' (close)
+        # alias 'C' collides with the Candles container field 'c' (candles list).
+        resp = await api.candles_without_preload_content(
+            market_id=market_id,
+            resolution=resolution,
+            start_timestamp=start_ms,
+            end_timestamp=end_ms,
+            count_back=buffer_candles,
+        )
+        raw = await resp.json()
+        candles = raw.get("c", [])
+        series = _parse_lighter_candles(candles)
+        logger.debug(
+            f"Lighter candles for market {market_id} ({resolution}): "
+            f"{len(series)} points"
+        )
+        return series
+    except Exception as e:
+        logger.error(f"Error fetching Lighter candles for market {market_id}: {e}")
+        return pd.Series(dtype=float)
+
+
+async def fetch_candles(
+    ticker: str,
+    resolution: str,
+    candles_needed: int,
+    market_id: int | None = None,
+) -> pd.Series:
+    """Fetch close price series.
+
+    Routes to Lighter DEX for short intervals (≤1h) when market_id is
+    provided, otherwise falls back to Hyperliquid.
+
+    Args:
+        ticker: Asset ticker (e.g. "SOL", "1000BONK").
+        resolution: Candle interval (e.g. "1h", "4h", "8h").
+        candles_needed: Number of candles to fetch.
+        market_id: Optional Lighter market ID. When set and resolution is
+            in LIGHTER_CANDLE_INTERVALS, uses Lighter DEX data.
+
+    Returns:
+        pd.Series of close prices with datetime index.
+    """
+    # Route to Lighter for short intervals when market_id is available
+    if market_id is not None and resolution in LIGHTER_CANDLE_INTERVALS:
+        return await fetch_candles_lighter(market_id, resolution, candles_needed)
+
     import asyncio
 
     hl_ticker = _to_hl_ticker(ticker)
@@ -114,10 +193,14 @@ async def fetch_pair_data(
     window_candles: int,
     train_interval: str,
     train_candles: int,
+    market_id_a: int | None = None,
+    market_id_b: int | None = None,
 ) -> dict[str, pd.Series]:
     """Fetch all price data needed for signal computation.
 
-    Uses asset ticker names via Hyperliquid.
+    When market_id_a/b are provided, short-interval fetches (≤1h) use
+    Lighter DEX data. Longer intervals always use Hyperliquid.
+
     Returns dict with keys: 'prices_a', 'prices_b', 'train_a', 'train_b'.
     """
     import asyncio
@@ -125,31 +208,36 @@ async def fetch_pair_data(
     if train_interval != window_interval:
         # Different intervals — fetch window and training data separately
         tasks = [
-            fetch_candles(asset_a, window_interval, window_candles),
-            fetch_candles(asset_b, window_interval, window_candles),
-            fetch_candles(asset_a, train_interval, train_candles),
-            fetch_candles(asset_b, train_interval, train_candles),
+            fetch_candles(asset_a, window_interval, window_candles, market_id=market_id_a),
+            fetch_candles(asset_b, window_interval, window_candles, market_id=market_id_b),
+            fetch_candles(asset_a, train_interval, train_candles, market_id=market_id_a),
+            fetch_candles(asset_b, train_interval, train_candles, market_id=market_id_b),
         ]
         results = await asyncio.gather(*tasks)
+        # Align each pair by datetime index to handle mismatched candle counts
+        prices_a, prices_b = results[0].align(results[1], join="inner")
+        train_a, train_b = results[2].align(results[3], join="inner")
         return {
-            "prices_a": results[0],
-            "prices_b": results[1],
-            "train_a": results[2],
-            "train_b": results[3],
+            "prices_a": prices_a,
+            "prices_b": prices_b,
+            "train_a": train_a,
+            "train_b": train_b,
         }
     else:
         # Same interval — fetch once with enough candles for both
         needed = max(window_candles, train_candles)
         tasks = [
-            fetch_candles(asset_a, window_interval, needed),
-            fetch_candles(asset_b, window_interval, needed),
+            fetch_candles(asset_a, window_interval, needed, market_id=market_id_a),
+            fetch_candles(asset_b, window_interval, needed, market_id=market_id_b),
         ]
         results = await asyncio.gather(*tasks)
+        # Align by datetime index to handle mismatched candle counts
+        aligned_a, aligned_b = results[0].align(results[1], join="inner")
         return {
-            "prices_a": results[0],
-            "prices_b": results[1],
-            "train_a": results[0],
-            "train_b": results[1],
+            "prices_a": aligned_a,
+            "prices_b": aligned_b,
+            "train_a": aligned_a,
+            "train_b": aligned_b,
         }
 
 
@@ -167,7 +255,9 @@ def _resolution_to_seconds(resolution: str) -> int:
         "2h": 7200,
         "4h": 14400,
         "8h": 28800,
+        "12h": 43200,
         "1d": 86400,
+        "1w": 604800,
     }
     return mapping.get(resolution, 14400)
 
@@ -194,6 +284,37 @@ def _parse_candles(candles: list[dict]) -> pd.Series:
         return df["close"].dropna()
     except Exception as e:
         logger.error(f"Failed to parse candles: {e}")
+        return pd.Series(dtype=float)
+
+
+def _parse_lighter_candles(candles: list[dict]) -> pd.Series:
+    """Parse Lighter DEX raw candle dicts into a close price Series.
+
+    Each candle dict has shortened keys: t (timestamp), O (open), H (high),
+    L (low), C (close), V (volume). We use 'C' for close price.
+    """
+    try:
+        if not candles:
+            return pd.Series(dtype=float)
+
+        records = []
+        for c in candles:
+            # Close price is in 'C' (aliased field in SDK)
+            close = c.get("C") or c.get("c")
+            ts = c.get("t")
+            if close is not None and ts is not None:
+                records.append({"t": ts, "close": close})
+
+        if not records:
+            return pd.Series(dtype=float)
+
+        df = pd.DataFrame(records)
+        df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True)
+        df["close"] = pd.to_numeric(df["close"], errors="coerce")
+        df = df.set_index("t").sort_index()
+        return df["close"].dropna()
+    except Exception as e:
+        logger.error(f"Failed to parse Lighter candles: {e}")
         return pd.Series(dtype=float)
 
 

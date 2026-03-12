@@ -28,7 +28,9 @@ class TradingPairCreate(BaseModel):
     position_size_pct: float = Field(default=50.0, gt=0, le=100)
     leverage: float = Field(default=5.0, gt=0)
     twap_minutes: int = Field(default=0, ge=0)
-    order_mode: Literal["market", "twap"] = "market"
+    order_mode: Literal["market", "twap", "sliced"] = "market"
+    slice_chunks: int = Field(default=10, ge=2, le=50)
+    slice_delay_sec: float = Field(default=2.0, ge=0.5, le=30)
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
     schedule_interval: str = "15m"
     is_enabled: bool = True
@@ -90,7 +92,9 @@ class TradingPairUpdate(BaseModel):
     position_size_pct: float | None = Field(default=None, gt=0, le=100)
     leverage: float | None = Field(default=None, gt=0)
     twap_minutes: int | None = Field(default=None, ge=0)
-    order_mode: Literal["market", "twap"] | None = None
+    order_mode: Literal["market", "twap", "sliced"] | None = None
+    slice_chunks: int | None = Field(default=None, ge=2, le=50)
+    slice_delay_sec: float | None = Field(default=None, ge=0.5, le=30)
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
     schedule_interval: str | None = None
     is_enabled: bool | None = None
@@ -168,6 +172,8 @@ class TradingPairRead(BaseModel):
     leverage: float
     twap_minutes: int
     order_mode: str
+    slice_chunks: int
+    slice_delay_sec: float
     min_equity_pct: float
     schedule_interval: str
     is_enabled: bool
