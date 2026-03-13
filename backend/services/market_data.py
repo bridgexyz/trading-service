@@ -160,8 +160,8 @@ async def fetch_orderbook(market_id: int) -> dict:
     client = await _get_api_client()
     try:
         api = OrderApi(client)
-        details = await api.get_orderbook_details(market_id=market_id)
-        return _parse_orderbook(details)
+        result = await api.order_book_orders(market_id=market_id, limit=1)
+        return _parse_orderbook(result)
     except Exception as e:
         logger.error(f"Error fetching orderbook for market {market_id}: {e}")
         return {"mid_price": 0.0, "best_bid": 0.0, "best_ask": 0.0}
@@ -328,8 +328,13 @@ def _parse_orderbook(details) -> dict:
             bids = getattr(details, "bids", [])
             asks = getattr(details, "asks", [])
 
-        best_bid = float(bids[0]["price"]) if bids else 0.0
-        best_ask = float(asks[0]["price"]) if asks else 0.0
+        def _get_price(order):
+            if isinstance(order, dict):
+                return float(order["price"])
+            return float(order.price)
+
+        best_bid = _get_price(bids[0]) if bids else 0.0
+        best_ask = _get_price(asks[0]) if asks else 0.0
         mid = (best_bid + best_ask) / 2 if best_bid and best_ask else best_bid or best_ask
 
         return {"mid_price": mid, "best_bid": best_bid, "best_ask": best_ask}
