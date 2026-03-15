@@ -302,12 +302,14 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
 
     equity_floor = position_size * pair.min_equity_pct / 100.0
 
-    # Update tracked equity from balance-derived position size
+    # Initialize tracked equity only on first trade (when it's 0);
+    # thereafter, current_equity changes only through realized PnL.
     with Session(engine) as session:
         db_pair = session.get(TradingPair, pair.id)
-        db_pair.current_equity = position_size
-        session.add(db_pair)
-        session.commit()
+        if db_pair.current_equity <= 0:
+            db_pair.current_equity = position_size
+            session.add(db_pair)
+            session.commit()
 
     entry = signal_engine.evaluate_entry(
         signals=signals,
@@ -466,6 +468,10 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
     current_price_a = float(prices_a.iloc[-1])
     current_price_b = float(prices_b.iloc[-1])
 
+    # Use entry-time equity (notional / leverage) as PnL denominator,
+    # not pair.current_equity which could be inflated by deposits.
+    entry_equity = position.entry_notional / pair.leverage if pair.leverage > 0 else position.entry_notional
+
     exit_sig = signal_engine.evaluate_exit(
         signals=signals,
         position_direction=position.direction,
@@ -474,7 +480,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         entry_price_b=position.entry_price_b,
         entry_hedge_ratio=position.entry_hedge_ratio,
         entry_notional=position.entry_notional,
-        current_equity=pair.current_equity,
+        current_equity=entry_equity,
         exit_z=pair.exit_z,
         stop_z=pair.stop_z,
         stop_loss_pct=pair.stop_loss_pct,
@@ -604,13 +610,13 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         exit_pb = result_b.filled_price or current_price_b
 
         if exit_sig.exit_reason == "stop_loss":
-            pnl = -pair.stop_loss_pct / 100 * pair.current_equity
+            pnl = -pair.stop_loss_pct / 100 * entry_equity
         else:
             pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
             pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
             pnl = pnl_a + pnl_b
 
-        pnl_pct = pnl / pair.current_equity * 100 if pair.current_equity > 0 else 0
+        pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
 
         # Determine duration (approximate in candles — we don't track entry index in live)
         duration = 0
