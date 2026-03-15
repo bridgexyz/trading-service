@@ -302,14 +302,13 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
 
     equity_floor = position_size * pair.min_equity_pct / 100.0
 
-    # Initialize tracked equity only on first trade (when it's 0);
-    # thereafter, current_equity changes only through realized PnL.
+    # Track equity from balance (position sizing capital).
+    # PnL calculations use entry_notional/leverage, so deposits don't inflate PnL.
     with Session(engine) as session:
         db_pair = session.get(TradingPair, pair.id)
-        if db_pair.current_equity <= 0:
-            db_pair.current_equity = position_size
-            session.add(db_pair)
-            session.commit()
+        db_pair.current_equity = position_size
+        session.add(db_pair)
+        session.commit()
 
     entry = signal_engine.evaluate_entry(
         signals=signals,
