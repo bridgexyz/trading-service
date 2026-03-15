@@ -19,3 +19,7 @@ class OpenPosition(SQLModel, table=True):
     entry_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     lighter_order_id_a: str | None = None
     lighter_order_id_b: str | None = None
+    fill_price_a: float | None = None
+    fill_price_b: float | None = None
+    fill_amount_a: float | None = None
+    fill_amount_b: float | None = None

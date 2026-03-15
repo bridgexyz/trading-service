@@ -53,7 +53,7 @@ export default function DashboardPage() {
       )}
 
       {/* Pair table */}
-      <div className="bg-surface-1 border border-border-default rounded-xl overflow-hidden">
+      <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border-default flex items-center justify-between">
           <h3 className="text-[11px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">
             Trading Pairs
@@ -129,7 +129,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Positions table — live from exchange */}
-      <div className="bg-surface-1 border border-border-default rounded-xl overflow-hidden">
+      <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border-default flex items-center justify-between">
           <h3 className="text-[11px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">
             Exchange Positions

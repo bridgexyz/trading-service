@@ -74,7 +74,7 @@ export default function PairDetailPage() {
         <div className="flex items-center gap-3">
           <Link
             to="/pairs"
-            className="w-8 h-8 rounded-lg bg-surface-2 border border-border-default flex items-center justify-center text-text-muted hover:text-text-primary hover:border-border-hover transition-all"
+            className="w-8 h-8 rounded-md bg-surface-2 border border-border-default flex items-center justify-center text-text-muted hover:text-text-primary hover:border-border-hover transition-all"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
@@ -94,13 +94,13 @@ export default function PairDetailPage() {
           <button
             onClick={() => triggerMut.mutate()}
             disabled={triggerMut.isPending}
-            className="bg-surface-2 hover:bg-surface-3 border border-border-default hover:border-border-hover text-text-secondary hover:text-text-primary px-3.5 py-2 rounded-lg text-[12px] font-medium font-mono tracking-wide transition-all disabled:opacity-40 min-h-[44px] sm:min-h-0"
+            className="bg-surface-2 hover:bg-surface-3 border border-border-default hover:border-border-hover text-text-secondary hover:text-text-primary px-3.5 py-2 rounded-md text-[12px] font-medium font-mono tracking-wide transition-all disabled:opacity-40 min-h-[44px] sm:min-h-0"
           >
             {triggerMut.isPending ? "RUNNING..." : "TRIGGER"}
           </button>
           <button
             onClick={() => toggleMut.mutate()}
-            className={`border px-3.5 py-2 rounded-lg text-[12px] font-medium font-mono tracking-wide transition-all min-h-[44px] sm:min-h-0 ${
+            className={`border px-3.5 py-2 rounded-md text-[12px] font-medium font-mono tracking-wide transition-all min-h-[44px] sm:min-h-0 ${
               pair.is_enabled
                 ? "bg-warning/8 border-warning/20 text-warning hover:bg-warning/15 hover:border-warning/40"
                 : "bg-accent/8 border-accent/20 text-accent hover:bg-accent/15 hover:border-accent/40"
@@ -131,7 +131,7 @@ export default function PairDetailPage() {
 
       {/* Equity chart */}
       {equity && equity.length > 0 && (
-        <div className="bg-surface-1 border border-border-default rounded-xl p-5 card-hover">
+        <div className="bg-surface-1 border border-border-default rounded-lg p-5 card-hover">
           <h3 className="text-[10px] font-mono font-medium text-text-muted uppercase tracking-[0.15em] mb-4">
             Equity Curve
           </h3>
@@ -179,7 +179,7 @@ export default function PairDetailPage() {
       )}
 
       {/* Trade history */}
-      <div className="bg-surface-1 border border-border-default rounded-xl overflow-hidden">
+      <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border-default">
           <h3 className="text-[10px] font-mono font-medium text-text-muted uppercase tracking-[0.15em]">
             Trade History
@@ -286,7 +286,7 @@ export default function PairDetailPage() {
       </div>
 
       {/* Job logs */}
-      <div className="bg-surface-1 border border-border-default rounded-xl overflow-hidden">
+      <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border-default">
           <h3 className="text-[10px] font-mono font-medium text-text-muted uppercase tracking-[0.15em]">
             Recent Job Logs

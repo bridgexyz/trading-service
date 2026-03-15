@@ -36,7 +36,7 @@ export default function LogsPage() {
         <select
           value={pairFilter}
           onChange={(e) => setPairFilter(e.target.value)}
-          className="bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
+          className="bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
         >
           <option value="">All Pairs</option>
           {pairs?.map((p) => (
@@ -48,7 +48,7 @@ export default function LogsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
+          className="bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
         >
           <option value="">All Statuses</option>
           <option value="success">Success</option>
@@ -65,7 +65,7 @@ export default function LogsPage() {
           return (
             <div
               key={l.id}
-              className="bg-surface-1 border border-border-default rounded-xl p-4 space-y-2 card-hover"
+              className="bg-surface-1 border border-border-default rounded-lg p-4 space-y-2 card-hover"
             >
               <div className="flex items-center justify-between">
                 <span className="text-[13px] font-medium text-text-primary">
@@ -108,7 +108,7 @@ export default function LogsPage() {
       </div>
 
       {/* Desktop table */}
-      <div className="hidden md:block bg-surface-1 border border-border-default rounded-xl overflow-hidden">
+      <div className="hidden md:block bg-surface-1 border border-border-default rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>

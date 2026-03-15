@@ -206,7 +206,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Mobile emergency stop FAB */}
       <button
         onClick={() => setStopModalOpen(true)}
-        className="md:hidden fixed bottom-6 right-6 z-30 bg-negative/90 hover:bg-negative text-white w-13 h-13 rounded-xl shadow-lg shadow-negative/20 flex items-center justify-center active:scale-95 transition-all border border-negative/40"
+        className="md:hidden fixed bottom-6 right-6 z-30 bg-negative/90 hover:bg-negative text-white w-13 h-13 rounded-lg shadow-lg shadow-negative/20 flex items-center justify-center active:scale-95 transition-all border border-negative/40"
         aria-label="Emergency Stop"
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -222,9 +222,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onClick={() => !emergencyMut.isPending && setStopModalOpen(false)}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="bg-surface-1 border border-negative/20 rounded-xl p-6 w-full max-w-sm space-y-4 shadow-2xl shadow-negative/5 animate-fade-up">
+            <div className="bg-surface-1 border border-negative/20 rounded-lg p-6 w-full max-w-sm space-y-4 shadow-2xl shadow-negative/5 animate-fade-up">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-negative/10 border border-negative/20 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-md bg-negative/10 border border-negative/20 flex items-center justify-center">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-negative">
                     <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
                   </svg>
@@ -238,7 +238,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </p>
 
               <div className="space-y-2">
-                <label className="flex items-center gap-2.5 text-[13px] text-text-primary cursor-pointer min-h-[44px] px-3 py-2 rounded-lg bg-surface-2/50 border border-border-default hover:border-border-hover transition-colors">
+                <label className="flex items-center gap-2.5 text-[13px] text-text-primary cursor-pointer min-h-[44px] px-3 py-2 rounded-md bg-surface-2/50 border border-border-default hover:border-border-hover transition-colors">
                   <input
                     type="checkbox"
                     checked={closePositions}
@@ -247,7 +247,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   />
                   Close all open positions
                 </label>
-                <label className="flex items-center gap-2.5 text-[13px] text-text-primary cursor-pointer min-h-[44px] px-3 py-2 rounded-lg bg-surface-2/50 border border-border-default hover:border-border-hover transition-colors">
+                <label className="flex items-center gap-2.5 text-[13px] text-text-primary cursor-pointer min-h-[44px] px-3 py-2 rounded-md bg-surface-2/50 border border-border-default hover:border-border-hover transition-colors">
                   <input
                     type="checkbox"
                     checked={disablePairs}
@@ -274,14 +274,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => emergencyMut.mutate()}
                   disabled={emergencyMut.isPending || (!closePositions && !disablePairs)}
-                  className="bg-negative hover:bg-negative/80 text-white px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-50 min-h-[44px] flex-1"
+                  className="bg-negative hover:bg-negative/80 text-white px-4 py-2.5 rounded-md text-[13px] font-semibold transition-all disabled:opacity-50 min-h-[44px] flex-1"
                 >
                   {emergencyMut.isPending ? "Stopping..." : "Confirm Stop"}
                 </button>
                 <button
                   onClick={() => setStopModalOpen(false)}
                   disabled={emergencyMut.isPending}
-                  className="bg-surface-2 hover:bg-surface-3 text-text-secondary px-4 py-2.5 rounded-lg text-[13px] font-medium transition-colors min-h-[44px]"
+                  className="bg-surface-2 hover:bg-surface-3 text-text-secondary px-4 py-2.5 rounded-md text-[13px] font-medium transition-colors min-h-[44px]"
                 >
                   Cancel
                 </button>

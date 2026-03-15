@@ -75,7 +75,7 @@ function Field({
         onChange={(e) =>
           onChange(type === "number" ? Number(e.target.value) : e.target.value)
         }
-        className={`bg-surface-2/80 border border-border-default rounded-lg px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${w}`}
+        className={`bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${w}`}
       />
     </div>
   );
@@ -100,7 +100,7 @@ function SelectField({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-surface-2/80 border border-border-default rounded-lg px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
+        className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
       >
         {options.map((o) => (
           <option key={o}>{o}</option>
@@ -153,11 +153,11 @@ function AssetAutocomplete({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        className="bg-surface-2/80 border border-border-default rounded-lg px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted/50 hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-36"
+        className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted/50 hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-36"
         placeholder="Search..."
       />
       {open && filtered.length > 0 && (
-        <div className="absolute z-10 mt-1 w-52 max-h-48 overflow-auto bg-surface-1 border border-border-default rounded-xl shadow-2xl shadow-black/40">
+        <div className="absolute z-10 mt-1 w-52 max-h-48 overflow-auto bg-surface-1 border border-border-default rounded-lg shadow-2xl shadow-black/40">
           {filtered.map((m) => (
             <button
               key={m.market_id}
@@ -194,7 +194,7 @@ function PairForm({
   isEdit: boolean;
 }) {
   const [form, setForm] = useState<FormData>(initial);
-  const set = (key: keyof FormData, value: string | number | boolean) =>
+  const set = (key: keyof FormData, value: string | number | boolean | null) =>
     setForm((f) => ({ ...f, [key]: value }));
 
   const handleSubmit = () => {
@@ -203,7 +203,7 @@ function PairForm({
   };
 
   return (
-    <div className="bg-surface-1 border border-border-default rounded-xl p-5 space-y-3 animate-fade-up">
+    <div className="bg-surface-1 border border-border-default rounded-lg p-5 space-y-3 animate-fade-up">
       <h3 className="text-sm font-semibold tracking-tight">
         {isEdit ? "Edit Pair" : "New Trading Pair"}
       </h3>
@@ -281,7 +281,7 @@ function PairForm({
           <select
             value={form.credential_id ?? ""}
             onChange={(e) => set("credential_id", e.target.value ? Number(e.target.value) : null)}
-            className="bg-surface-2/80 border border-border-default rounded-lg px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
+            className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
           >
             <option value="">Default (first active)</option>
             {credentials.map((c) => (
@@ -314,13 +314,13 @@ function PairForm({
       <div className="flex gap-2 pt-4">
         <button
           onClick={handleSubmit}
-          className="bg-accent/90 hover:bg-accent text-surface-0 px-5 py-2.5 rounded-lg text-[13px] font-semibold transition-all shadow-lg shadow-accent/10 hover:shadow-accent/20 min-h-[44px] sm:min-h-0"
+          className="bg-accent/90 hover:bg-accent text-surface-0 px-5 py-2.5 rounded-md text-[13px] font-semibold transition-all shadow-lg shadow-accent/10 hover:shadow-accent/20 min-h-[44px] sm:min-h-0"
         >
           Save
         </button>
         <button
           onClick={onCancel}
-          className="bg-surface-2 hover:bg-surface-3 text-text-secondary px-5 py-2.5 rounded-lg text-[13px] font-medium transition-colors min-h-[44px] sm:min-h-0"
+          className="bg-surface-2 hover:bg-surface-3 text-text-secondary px-5 py-2.5 rounded-md text-[13px] font-medium transition-colors min-h-[44px] sm:min-h-0"
         >
           Cancel
         </button>
@@ -412,6 +412,134 @@ export default function PairsPage() {
     credential_id: pair.credential_id,
   });
 
+  const activePairs = pairs?.filter((p) => p.is_enabled) ?? [];
+  const pausedPairs = pairs?.filter((p) => !p.is_enabled) ?? [];
+
+  const renderMobileCard = (pair: TradingPair) => (
+    <div
+      key={pair.id}
+      className="bg-surface-1 border border-border-default rounded-lg p-4 space-y-3 card-hover"
+    >
+      <div className="flex items-center justify-between">
+        <Link
+          to={`/pairs/${pair.id}`}
+          className="text-[13px] text-accent hover:text-accent-hover font-medium transition-colors"
+        >
+          {pair.name}
+        </Link>
+        <StatusBadge status={pair.is_enabled ? "active" : "paused"} />
+      </div>
+      <div className="flex items-center gap-3 text-[11px] text-text-muted font-mono">
+        <span>{pair.asset_a}/{pair.asset_b}</span>
+        <span>{pair.schedule_interval}</span>
+        <span className="text-text-primary">${pair.current_equity.toFixed(0)}</span>
+      </div>
+      <div className="flex gap-1.5 pt-1">
+        <button
+          onClick={() => triggerMut.mutate(pair.id)}
+          disabled={triggerMut.isPending}
+          className="text-[11px] font-mono bg-surface-2 hover:bg-surface-3 border border-border-default text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-md transition-colors disabled:opacity-40 min-h-[44px]"
+        >
+          RUN
+        </button>
+        <button
+          onClick={() => toggleMut.mutate(pair.id)}
+          className="text-[11px] font-mono bg-surface-2 hover:bg-surface-3 border border-border-default text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-md transition-colors min-h-[44px]"
+        >
+          {pair.is_enabled ? "PAUSE" : "RESUME"}
+        </button>
+        <button
+          onClick={() => setEditId(pair.id)}
+          className="text-[11px] font-mono text-accent hover:text-accent-hover px-2.5 py-1.5 rounded-md hover:bg-surface-2 transition-colors min-h-[44px]"
+        >
+          EDIT
+        </button>
+        <button
+          onClick={() => {
+            if (confirm("Delete this pair?"))
+              deleteMut.mutate(pair.id);
+          }}
+          className="text-[11px] font-mono text-negative px-2.5 py-1.5 rounded-md hover:bg-negative/8 transition-colors min-h-[44px]"
+        >
+          DEL
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderDesktopRow = (pair: TradingPair) => (
+    <tr
+      key={pair.id}
+      className="border-b border-border-default/50 hover:bg-surface-2/30"
+    >
+      <td className="px-5 py-3">
+        <Link
+          to={`/pairs/${pair.id}`}
+          className="text-accent hover:text-accent-hover font-medium transition-colors"
+        >
+          {pair.name}
+        </Link>
+      </td>
+      <td className="px-5 py-3 text-text-secondary font-mono text-xs">
+        {pair.asset_a}/{pair.asset_b}
+      </td>
+      <td className="px-5 py-3 text-center text-text-secondary font-mono text-xs">
+        {pair.schedule_interval}
+      </td>
+      <td className="px-5 py-3 text-right font-mono text-text-primary">
+        ${pair.current_equity.toFixed(0)}
+      </td>
+      <td className="px-5 py-3 text-center">
+        <StatusBadge status={pair.is_enabled ? "active" : "paused"} />
+      </td>
+      <td className="px-5 py-3 text-right">
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => triggerMut.mutate(pair.id)}
+            disabled={triggerMut.isPending}
+            className="text-[11px] font-mono text-text-secondary hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-2 transition-colors disabled:opacity-40"
+          >
+            Run
+          </button>
+          <button
+            onClick={() => toggleMut.mutate(pair.id)}
+            className="text-[11px] font-mono text-text-secondary hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-2 transition-colors"
+          >
+            {pair.is_enabled ? "Pause" : "Resume"}
+          </button>
+          <button
+            onClick={() => setEditId(pair.id)}
+            className="text-[11px] font-mono text-accent hover:text-accent-hover px-2 py-1 rounded-md hover:bg-surface-2 transition-colors"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Delete this pair?"))
+                deleteMut.mutate(pair.id);
+            }}
+            className="text-[11px] font-mono text-negative hover:text-negative px-2 py-1 rounded-md hover:bg-negative/8 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  const desktopTableHead = (
+    <thead>
+      <tr className="border-b border-border-default">
+        <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Name</th>
+        <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Assets</th>
+        <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Schedule</th>
+        <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Equity</th>
+        <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Status</th>
+        <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Actions</th>
+      </tr>
+    </thead>
+  );
+
   return (
     <div className="space-y-6 max-w-7xl">
       <div className="flex items-baseline justify-between">
@@ -424,7 +552,7 @@ export default function PairsPage() {
             setShowForm(true);
             setEditId(null);
           }}
-          className="bg-accent/90 hover:bg-accent text-surface-0 px-4 py-2.5 rounded-lg text-[12px] font-semibold transition-all shadow-lg shadow-accent/10 hover:shadow-accent/20 tracking-wide min-h-[44px] sm:min-h-0"
+          className="bg-accent/90 hover:bg-accent text-surface-0 px-4 py-2.5 rounded-md text-[12px] font-semibold transition-all shadow-lg shadow-accent/10 hover:shadow-accent/20 tracking-wide min-h-[44px] sm:min-h-0"
         >
           + ADD PAIR
         </button>
@@ -453,146 +581,68 @@ export default function PairsPage() {
       )}
 
       {/* Mobile card layout */}
-      <div className="md:hidden space-y-2">
-        {pairs?.map((pair) => (
-          <div
-            key={pair.id}
-            className="bg-surface-1 border border-border-default rounded-xl p-4 space-y-3 card-hover"
-          >
-            <div className="flex items-center justify-between">
-              <Link
-                to={`/pairs/${pair.id}`}
-                className="text-[13px] text-accent hover:text-accent-hover font-medium transition-colors"
-              >
-                {pair.name}
-              </Link>
-              <StatusBadge status={pair.is_enabled ? "active" : "paused"} />
+      <div className="md:hidden space-y-4">
+        {activePairs.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-[10px] text-text-secondary uppercase tracking-[0.15em] font-mono font-medium">
+              Active Pairs
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-text-muted font-mono">
-              <span>{pair.asset_a}/{pair.asset_b}</span>
-              <span>{pair.schedule_interval}</span>
-              <span className="text-text-primary">${pair.current_equity.toFixed(0)}</span>
-            </div>
-            <div className="flex gap-1.5 pt-1">
-              <button
-                onClick={() => triggerMut.mutate(pair.id)}
-                disabled={triggerMut.isPending}
-                className="text-[11px] font-mono bg-surface-2 hover:bg-surface-3 border border-border-default text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 min-h-[44px]"
-              >
-                RUN
-              </button>
-              <button
-                onClick={() => toggleMut.mutate(pair.id)}
-                className="text-[11px] font-mono bg-surface-2 hover:bg-surface-3 border border-border-default text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-lg transition-colors min-h-[44px]"
-              >
-                {pair.is_enabled ? "PAUSE" : "RESUME"}
-              </button>
-              <button
-                onClick={() => setEditId(pair.id)}
-                className="text-[11px] font-mono text-accent hover:text-accent-hover px-2.5 py-1.5 rounded-lg hover:bg-surface-2 transition-colors min-h-[44px]"
-              >
-                EDIT
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm("Delete this pair?"))
-                    deleteMut.mutate(pair.id);
-                }}
-                className="text-[11px] font-mono text-negative px-2.5 py-1.5 rounded-lg hover:bg-negative/8 transition-colors min-h-[44px]"
-              >
-                DEL
-              </button>
-            </div>
+            {activePairs.map(renderMobileCard)}
           </div>
-        ))}
-        {(!pairs || pairs.length === 0) && (
+        )}
+        {pausedPairs.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-[10px] text-text-secondary uppercase tracking-[0.15em] font-mono font-medium">
+              Paused Pairs
+            </div>
+            {pausedPairs.map(renderMobileCard)}
+          </div>
+        )}
+        {activePairs.length === 0 && pausedPairs.length === 0 && (
           <p className="text-center text-text-muted py-12 text-sm">
             No pairs configured yet.
           </p>
         )}
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block bg-surface-1 border border-border-default rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border-default">
-                <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Name</th>
-                <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Assets</th>
-                <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Schedule</th>
-                <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Equity</th>
-                <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Status</th>
-                <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pairs?.map((pair) => (
-                <tr
-                  key={pair.id}
-                  className="border-b border-border-default/50 hover:bg-surface-2/30"
-                >
-                  <td className="px-5 py-3">
-                    <Link
-                      to={`/pairs/${pair.id}`}
-                      className="text-accent hover:text-accent-hover font-medium transition-colors"
-                    >
-                      {pair.name}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3 text-text-secondary font-mono text-xs">
-                    {pair.asset_a}/{pair.asset_b}
-                  </td>
-                  <td className="px-5 py-3 text-center text-text-secondary font-mono text-xs">
-                    {pair.schedule_interval}
-                  </td>
-                  <td className="px-5 py-3 text-right font-mono text-text-primary">
-                    ${pair.current_equity.toFixed(0)}
-                  </td>
-                  <td className="px-5 py-3 text-center">
-                    <StatusBadge status={pair.is_enabled ? "active" : "paused"} />
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => triggerMut.mutate(pair.id)}
-                        disabled={triggerMut.isPending}
-                        className="text-[11px] font-mono text-text-secondary hover:text-text-primary px-2 py-1 rounded-lg hover:bg-surface-2 transition-colors disabled:opacity-40"
-                      >
-                        Run
-                      </button>
-                      <button
-                        onClick={() => toggleMut.mutate(pair.id)}
-                        className="text-[11px] font-mono text-text-secondary hover:text-text-primary px-2 py-1 rounded-lg hover:bg-surface-2 transition-colors"
-                      >
-                        {pair.is_enabled ? "Pause" : "Resume"}
-                      </button>
-                      <button
-                        onClick={() => setEditId(pair.id)}
-                        className="text-[11px] font-mono text-accent hover:text-accent-hover px-2 py-1 rounded-lg hover:bg-surface-2 transition-colors"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("Delete this pair?"))
-                            deleteMut.mutate(pair.id);
-                        }}
-                        className="text-[11px] font-mono text-negative hover:text-negative px-2 py-1 rounded-lg hover:bg-negative/8 transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {(!pairs || pairs.length === 0) && (
-          <p className="text-center text-text-muted py-12 text-sm">
-            No pairs configured yet.
-          </p>
+      {/* Desktop tables */}
+      <div className="hidden md:block space-y-4">
+        {activePairs.length > 0 && (
+          <div>
+            <div className="text-[10px] text-text-secondary uppercase tracking-[0.15em] font-mono font-medium mb-2">
+              Active Pairs
+            </div>
+            <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  {desktopTableHead}
+                  <tbody>{activePairs.map(renderDesktopRow)}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+        {pausedPairs.length > 0 && (
+          <div>
+            <div className="text-[10px] text-text-secondary uppercase tracking-[0.15em] font-mono font-medium mb-2">
+              Paused Pairs
+            </div>
+            <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  {desktopTableHead}
+                  <tbody>{pausedPairs.map(renderDesktopRow)}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+        {activePairs.length === 0 && pausedPairs.length === 0 && (
+          <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
+            <p className="text-center text-text-muted py-12 text-sm">
+              No pairs configured yet.
+            </p>
+          </div>
         )}
       </div>
     </div>

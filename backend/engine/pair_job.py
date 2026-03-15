@@ -202,6 +202,10 @@ async def _execute_sliced_orders(
     last_result_a = None
     last_result_b = None
     completed = 0
+    total_fill_qty_a = 0.0
+    total_fill_value_a = 0.0
+    total_fill_qty_b = 0.0
+    total_fill_value_b = 0.0
 
     for i in range(pair.slice_chunks):
         # Fetch fresh orderbook mid-prices for slippage calculation
@@ -253,10 +257,25 @@ async def _execute_sliced_orders(
         last_result_a = result_a
         last_result_b = result_b
         completed += 1
+
+        if result_a.filled_price and result_a.filled_amount:
+            total_fill_qty_a += result_a.filled_amount
+            total_fill_value_a += result_a.filled_price * result_a.filled_amount
+        if result_b.filled_price and result_b.filled_amount:
+            total_fill_qty_b += result_b.filled_amount
+            total_fill_value_b += result_b.filled_price * result_b.filled_amount
         logger.info(f"[{pair.name}] Sliced chunk {completed}/{pair.slice_chunks} complete")
 
         if i < pair.slice_chunks - 1:
             await asyncio.sleep(pair.slice_delay_sec)
+
+    # Set VWAP on the last results for accurate fill price tracking
+    if last_result_a and total_fill_qty_a > 0:
+        last_result_a.filled_price = total_fill_value_a / total_fill_qty_a
+        last_result_a.filled_amount = total_fill_qty_a
+    if last_result_b and total_fill_qty_b > 0:
+        last_result_b.filled_price = total_fill_value_b / total_fill_qty_b
+        last_result_b.filled_amount = total_fill_qty_b
 
     return last_result_a, last_result_b, completed
 
@@ -422,6 +441,10 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                 entry_notional=entry.notional,
                 lighter_order_id_a=result_a.order_id,
                 lighter_order_id_b=result_b.order_id,
+                fill_price_a=result_a.filled_price,
+                fill_price_b=result_b.filled_price,
+                fill_amount_a=result_a.filled_amount,
+                fill_amount_b=result_b.filled_amount,
             )
             session.add(pos)
             session.commit()
@@ -574,13 +597,18 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                            close_a=close_a, close_b=close_b)
                 return
 
-        # Compute PnL
+        # Compute PnL using actual fill prices when available
+        entry_pa = position.fill_price_a or position.entry_price_a
+        entry_pb = position.fill_price_b or position.entry_price_b
+        exit_pa = result_a.filled_price or current_price_a
+        exit_pb = result_b.filled_price or current_price_b
+
         if exit_sig.exit_reason == "stop_loss":
             pnl = -pair.stop_loss_pct / 100 * pair.current_equity
         else:
-            spread_change = (current_price_a - position.entry_hedge_ratio * current_price_b) - position.entry_spread
-            spread_units = units
-            pnl = position.direction * spread_change * spread_units
+            pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
+            pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
+            pnl = pnl_a + pnl_b
 
         pnl_pct = pnl / pair.current_equity * 100 if pair.current_equity > 0 else 0
 
@@ -596,10 +624,10 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                 direction=direction_str,
                 entry_time=position.entry_time,
                 exit_time=datetime.now(timezone.utc),
-                entry_price_a=position.entry_price_a,
-                exit_price_a=current_price_a,
-                entry_price_b=position.entry_price_b,
-                exit_price_b=current_price_b,
+                entry_price_a=position.fill_price_a or position.entry_price_a,
+                exit_price_a=result_a.filled_price or current_price_a,
+                entry_price_b=position.fill_price_b or position.entry_price_b,
+                exit_price_b=result_b.filled_price or current_price_b,
                 size_a=round(size_a, 4),
                 size_b=round(size_b, 4),
                 hedge_ratio=position.entry_hedge_ratio,
