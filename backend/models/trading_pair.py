@@ -47,6 +47,9 @@ class TradingPair(SQLModel, table=True):
     schedule_interval: str = "15m"
     is_enabled: bool = True
 
+    # Credential assignment (None = use first active credential)
+    credential_id: int | None = Field(default=None, foreign_key="credential.id")
+
     # Runtime state
     current_equity: float = 0.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

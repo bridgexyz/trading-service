@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "../api/client";
 import StatusBadge from "../components/StatusBadge";
-import type { TradingPair } from "../types";
+import type { TradingPair, Credential } from "../types";
 
 const INTERVALS = ["15m", "1h", "2h", "4h", "8h", "1d"];
 
@@ -36,6 +36,7 @@ const defaultPair = {
   slice_delay_sec: 2.0,
   schedule_interval: 10,
   is_enabled: true,
+  credential_id: null as number | null,
 };
 
 type FormData = typeof defaultPair;
@@ -182,12 +183,14 @@ function PairForm({
   onSubmit,
   onCancel,
   markets,
+  credentials,
   isEdit,
 }: {
   initial: FormData;
   onSubmit: (data: SubmitData) => void;
   onCancel: () => void;
   markets: Market[];
+  credentials: Credential[];
   isEdit: boolean;
 }) {
   const [form, setForm] = useState<FormData>(initial);
@@ -268,9 +271,26 @@ function PairForm({
         )}
       </div>
 
-      <SectionLabel>Schedule</SectionLabel>
+      <SectionLabel>Schedule & Credential</SectionLabel>
       <div className="flex flex-wrap gap-3 items-end">
         <Field label="Schedule Interval (min)" value={form.schedule_interval} onChange={(v) => set("schedule_interval", v)} />
+        <div>
+          <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+            Credential
+          </label>
+          <select
+            value={form.credential_id ?? ""}
+            onChange={(e) => set("credential_id", e.target.value ? Number(e.target.value) : null)}
+            className="bg-surface-2/80 border border-border-default rounded-lg px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
+          >
+            <option value="">Default (first active)</option>
+            {credentials.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} {!c.is_active && "(inactive)"}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
             Enabled
@@ -322,6 +342,11 @@ export default function PairsPage() {
   const { data: markets = [] } = useQuery<Market[]>({
     queryKey: ["markets"],
     queryFn: () => api.get("/markets").then((r) => r.data),
+  });
+
+  const { data: credentials = [] } = useQuery<Credential[]>({
+    queryKey: ["credentials"],
+    queryFn: () => api.get("/credentials").then((r) => r.data),
   });
 
   const createMut = useMutation({
@@ -384,6 +409,7 @@ export default function PairsPage() {
     slice_delay_sec: pair.slice_delay_sec ?? 2.0,
     schedule_interval: parseInt(pair.schedule_interval) || 10,
     is_enabled: pair.is_enabled,
+    credential_id: pair.credential_id,
   });
 
   return (
@@ -410,6 +436,7 @@ export default function PairsPage() {
           onSubmit={(data) => createMut.mutate(data)}
           onCancel={() => setShowForm(false)}
           markets={markets}
+          credentials={credentials}
           isEdit={false}
         />
       )}
@@ -420,6 +447,7 @@ export default function PairsPage() {
           onSubmit={(data) => updateMut.mutate({ id: editId, data })}
           onCancel={() => setEditId(null)}
           markets={markets}
+          credentials={credentials}
           isEdit={true}
         />
       )}

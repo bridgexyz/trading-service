@@ -34,6 +34,7 @@ class TradingPairCreate(BaseModel):
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
     schedule_interval: str = "15m"
     is_enabled: bool = True
+    credential_id: int | None = None
 
     @field_validator("asset_a", "asset_b")
     @classmethod
@@ -98,6 +99,7 @@ class TradingPairUpdate(BaseModel):
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
     schedule_interval: str | None = None
     is_enabled: bool | None = None
+    credential_id: int | None = None
 
     @field_validator("name", "asset_a", "asset_b")
     @classmethod
@@ -177,6 +179,7 @@ class TradingPairRead(BaseModel):
     min_equity_pct: float
     schedule_interval: str
     is_enabled: bool
+    credential_id: int | None
     current_equity: float
     created_at: datetime
     updated_at: datetime

@@ -264,7 +264,7 @@ async def _execute_sliced_orders(
 async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute entry if conditions are met."""
     # Compute position size from account balance percentage
-    lighter_client = await _get_lighter_client()
+    lighter_client = await _get_lighter_client(pair.credential_id)
     if lighter_client is None:
         _log_cycle(pair.id, "error", signals=signals, message="No active credential",
                    close_a=close_a, close_b=close_b)
@@ -316,7 +316,7 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
     dollar_per_unit = current_price_a + abs(signals.hedge_ratio) * current_price_b
     units = entry.notional / dollar_per_unit if dollar_per_unit > 0 else 0
 
-    lighter_client = await _get_lighter_client()
+    lighter_client = await _get_lighter_client(pair.credential_id)
     if lighter_client is None:
         _log_cycle(pair.id, "error", signals=signals, message="No active credential",
                    close_a=close_a, close_b=close_b)
@@ -468,7 +468,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         return
 
     # Place closing orders (reverse of entry)
-    lighter_client = await _get_lighter_client()
+    lighter_client = await _get_lighter_client(pair.credential_id)
     if lighter_client is None:
         _log_cycle(pair.id, "error", signals=signals, message="No active credential for exit",
                    close_a=close_a, close_b=close_b)
@@ -692,14 +692,17 @@ async def _rollback_partial_fill(
             )
 
 
-async def _get_lighter_client():
-    """Get a LighterClient from the active credential."""
+async def _get_lighter_client(credential_id: int | None = None):
+    """Get a LighterClient for a specific or the first active credential."""
     from backend.services.lighter_client import LighterClient
 
     with Session(engine) as session:
-        cred = session.exec(
-            select(Credential).where(Credential.is_active == True)
-        ).first()
+        if credential_id is not None:
+            cred = session.get(Credential, credential_id)
+        else:
+            cred = session.exec(
+                select(Credential).where(Credential.is_active == True)
+            ).first()
         if not cred:
             return None
 

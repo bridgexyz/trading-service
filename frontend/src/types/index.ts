@@ -26,6 +26,7 @@ export interface TradingPair {
   min_equity_pct: number;
   schedule_interval: string;
   is_enabled: boolean;
+  credential_id: number | null;
   current_equity: number;
   created_at: string;
   updated_at: string;

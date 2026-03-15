@@ -52,6 +52,13 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE trading_pair ADD COLUMN slice_delay_sec REAL NOT NULL DEFAULT 2.0"))
             conn.commit()
 
+    # Add credential_id column for per-pair credential assignment
+    if "credential_id" not in columns:
+        logger.info("Migrating: adding credential_id column to trading_pair")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN credential_id INTEGER REFERENCES credential(id)"))
+            conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")
