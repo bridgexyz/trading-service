@@ -29,12 +29,12 @@ class LighterClient:
         host: str,
         private_key: str,
         api_key_index: int,
-        account_index: int,
+        account_index: int | str,
     ):
         self.host = host
         self.private_key = private_key
         self.api_key_index = api_key_index
-        self.account_index = account_index
+        self.account_index = int(account_index)
         self._api_client = None
         self._signer_client = None
         self._mock_mode = False

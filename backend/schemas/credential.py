@@ -13,7 +13,7 @@ class CredentialCreate(BaseModel):
     lighter_host: str = "https://mainnet.zklighter.elliot.ai"
     api_key_index: int = Field(default=3, ge=0)
     private_key: str  # Raw hex private key — will be encrypted before storage
-    account_index: int = Field(default=0, ge=0)
+    account_index: str = "0"
 
     @field_validator("name")
     @classmethod
@@ -49,7 +49,7 @@ class CredentialUpdate(BaseModel):
     lighter_host: str | None = None
     api_key_index: int | None = Field(default=None, ge=0)
     private_key: str | None = None  # If provided, re-encrypts
-    account_index: int | None = Field(default=None, ge=0)
+    account_index: str | None = None
     is_active: bool | None = None
 
     @field_validator("name")
@@ -92,7 +92,7 @@ class CredentialRead(BaseModel):
     name: str
     lighter_host: str
     api_key_index: int
-    account_index: int
+    account_index: str
     is_active: bool
     created_at: datetime
     # private_key is NEVER exposed

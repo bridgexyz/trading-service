@@ -59,6 +59,37 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE trading_pair ADD COLUMN credential_id INTEGER REFERENCES credential(id)"))
             conn.commit()
 
+    # Migrate credential.account_index from INTEGER to TEXT for large values
+    if "credential" in inspector.get_table_names():
+        cred_columns = {col["name"]: col for col in inspector.get_columns("credential")}
+        if "account_index" in cred_columns:
+            col_type = str(cred_columns["account_index"]["type"]).upper()
+            if "INT" in col_type:
+                logger.info("Migrating: credential.account_index INTEGER -> TEXT")
+                with engine.connect() as conn:
+                    if settings.database_url.startswith("sqlite"):
+                        # SQLite: rename table, recreate, copy data
+                        conn.execute(text("ALTER TABLE credential RENAME TO credential_old"))
+                        conn.execute(text(
+                            "CREATE TABLE credential ("
+                            "id INTEGER PRIMARY KEY, name VARCHAR, lighter_host VARCHAR, "
+                            "api_key_index INTEGER, private_key_encrypted VARCHAR, "
+                            "account_index VARCHAR NOT NULL DEFAULT '0', "
+                            "is_active BOOLEAN, created_at TIMESTAMP)"
+                        ))
+                        conn.execute(text(
+                            "INSERT INTO credential SELECT id, name, lighter_host, "
+                            "api_key_index, private_key_encrypted, CAST(account_index AS VARCHAR), "
+                            "is_active, created_at FROM credential_old"
+                        ))
+                        conn.execute(text("DROP TABLE credential_old"))
+                    else:
+                        conn.execute(text(
+                            "ALTER TABLE credential "
+                            "ALTER COLUMN account_index TYPE VARCHAR USING account_index::VARCHAR"
+                        ))
+                    conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

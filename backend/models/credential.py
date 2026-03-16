@@ -12,6 +12,6 @@ class Credential(SQLModel, table=True):
     lighter_host: str = "https://mainnet.zklighter.elliot.ai"
     api_key_index: int = 3
     private_key_encrypted: str = ""  # Fernet-encrypted hex private key
-    account_index: int = 0
+    account_index: str = "0"
     is_active: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

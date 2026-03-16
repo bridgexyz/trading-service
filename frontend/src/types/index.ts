@@ -56,7 +56,7 @@ export interface Credential {
   name: string;
   lighter_host: string;
   api_key_index: number;
-  account_index: number;
+  account_index: string;
   is_active: boolean;
   created_at: string;
 }

@@ -10,3 +10,4 @@ dist/
 .claude/
 market data
 plan/
+get_account_indexs.py

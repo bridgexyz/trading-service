@@ -12,7 +12,7 @@ export default function CredentialsPage() {
     lighter_host: "https://mainnet.zklighter.elliot.ai",
     api_key_index: 3,
     private_key: "",
-    account_index: 0,
+    account_index: "0",
   });
 
   const { data: creds } = useQuery<Credential[]>({
@@ -113,10 +113,10 @@ export default function CredentialsPage() {
                 Account Index
               </label>
               <input
-                type="number"
+                type="text"
                 value={form.account_index}
-                onChange={(e) => setForm({ ...form, account_index: Number(e.target.value) })}
-                className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-20 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                onChange={(e) => setForm({ ...form, account_index: e.target.value })}
+                className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-44"
               />
             </div>
             <div>
