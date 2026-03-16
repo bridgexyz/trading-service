@@ -170,15 +170,18 @@ class LighterClient:
                 logger.error(f"Order rejected: {error}")
                 return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
-            filled_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
-            filled_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
+            raw_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            raw_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
             order_status = getattr(order, "status", None)
-            logger.info(f"Order placed: {order_id} ({'market' if market else 'limit'})")
+            # Decode raw integer values back to human-readable using market decimals
+            filled_price = float(raw_price) / 10 ** meta["price_decimals"] if raw_price is not None else None
+            filled_amount = float(raw_amount) / 10 ** meta["size_decimals"] if raw_amount is not None else None
+            logger.info(f"Order placed: {order_id} ({'market' if market else 'limit'}), fill_price={filled_price}, fill_amount={filled_amount}")
             return OrderResult(
                 success=True,
                 order_id=order_id,
-                filled_price=float(filled_price) if filled_price is not None else None,
-                filled_amount=float(filled_amount) if filled_amount is not None else None,
+                filled_price=filled_price,
+                filled_amount=filled_amount,
                 order_status=str(order_status) if order_status is not None else None,
                 raw_response=str(resp) if resp else None,
             )
@@ -248,15 +251,18 @@ class LighterClient:
                 logger.error(f"TWAP order rejected: {error}")
                 return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
-            filled_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
-            filled_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
+            raw_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            raw_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
             order_status = getattr(order, "status", None)
-            logger.info(f"TWAP order placed: {order_id} (duration={duration_minutes}min)")
+            # Decode raw integer values back to human-readable using market decimals
+            filled_price = float(raw_price) / 10 ** meta["price_decimals"] if raw_price is not None else None
+            filled_amount = float(raw_amount) / 10 ** meta["size_decimals"] if raw_amount is not None else None
+            logger.info(f"TWAP order placed: {order_id} (duration={duration_minutes}min), fill_price={filled_price}, fill_amount={filled_amount}")
             return OrderResult(
                 success=True,
                 order_id=order_id,
-                filled_price=float(filled_price) if filled_price is not None else None,
-                filled_amount=float(filled_amount) if filled_amount is not None else None,
+                filled_price=filled_price,
+                filled_amount=filled_amount,
                 order_status=str(order_status) if order_status is not None else None,
                 raw_response=str(resp) if resp else None,
             )
