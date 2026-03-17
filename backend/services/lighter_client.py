@@ -170,7 +170,8 @@ class LighterClient:
                 logger.error(f"Order rejected: {error}")
                 return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
-            raw_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            # avg_execution_price is the actual fill; order.price is the limit/worst we submitted
+            raw_price = getattr(order, "avg_execution_price", None) or getattr(order, "price", None)
             raw_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
             order_status = getattr(order, "status", None)
             # Decode raw integer values back to human-readable using market decimals
@@ -251,7 +252,8 @@ class LighterClient:
                 logger.error(f"TWAP order rejected: {error}")
                 return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
-            raw_price = getattr(order, "price", None) or getattr(order, "avg_execution_price", None)
+            # avg_execution_price is the actual fill; order.price is the limit/worst we submitted
+            raw_price = getattr(order, "avg_execution_price", None) or getattr(order, "price", None)
             raw_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
             order_status = getattr(order, "status", None)
             # Decode raw integer values back to human-readable using market decimals
