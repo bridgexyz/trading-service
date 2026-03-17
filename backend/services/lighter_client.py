@@ -316,25 +316,28 @@ class LighterClient:
             logger.error(f"Balance fetch failed: {e}", exc_info=True)
             return 0.0
 
-    async def get_positions(self) -> list[dict]:
-        """Get all open positions from the Lighter exchange.
-
-        Returns a list of dicts with keys: market_index, side, size, entry_price.
-        """
-        await self._ensure_clients()
-        if self._mock_mode:
-            return []
+    async def _get_account(self):
+        """Fetch the account object from Lighter."""
         import lighter
 
         account_api = lighter.AccountApi(self._api_client)
         resp = await account_api.account(
             by="index", value=str(self.account_index)
         )
-        # Unwrap DetailedAccounts → DetailedAccount
         if hasattr(resp, "accounts") and resp.accounts:
-            account = resp.accounts[0]
-        else:
-            account = resp
+            return resp.accounts[0]
+        return resp
+
+    async def get_positions(self) -> list[dict]:
+        """Get all open positions from the Lighter exchange.
+
+        Returns a list of dicts with keys: market_index, side, size, entry_price, realized_pnl.
+        """
+        await self._ensure_clients()
+        if self._mock_mode:
+            return []
+
+        account = await self._get_account()
         positions = []
         raw_positions = getattr(account, "positions", None) or []
         for pos in raw_positions:
@@ -347,8 +350,31 @@ class LighterClient:
                 "side": "long" if sign >= 0 else "short",
                 "size": abs(size),
                 "entry_price": float(getattr(pos, "avg_entry_price", 0)),
+                "realized_pnl": float(getattr(pos, "realized_pnl", 0)),
             })
         return positions
+
+    async def get_realized_pnl(self, market_indices: list[int]) -> dict[int, float]:
+        """Get realized PnL for specific markets (works even with zero-size positions).
+
+        Returns {market_index: realized_pnl}.
+        """
+        await self._ensure_clients()
+        if self._mock_mode:
+            return {m: 0.0 for m in market_indices}
+
+        account = await self._get_account()
+        result = {}
+        raw_positions = getattr(account, "positions", None) or []
+        for pos in raw_positions:
+            mid = int(getattr(pos, "market_id", 0))
+            if mid in market_indices:
+                result[mid] = float(getattr(pos, "realized_pnl", 0))
+        # Fill in any missing markets with 0
+        for m in market_indices:
+            if m not in result:
+                result[m] = 0.0
+        return result
 
     async def close(self):
         """Close SDK clients."""

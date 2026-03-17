@@ -403,10 +403,10 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
             await asyncio.sleep(settle_delay)
 
             exchange_positions = await lighter_client.get_positions()
-            exchange_markets = {p["market_index"] for p in exchange_positions}
+            exchange_by_market = {p["market_index"]: p for p in exchange_positions}
 
-            has_leg_a = pair.lighter_market_a in exchange_markets
-            has_leg_b = pair.lighter_market_b in exchange_markets
+            has_leg_a = pair.lighter_market_a in exchange_by_market
+            has_leg_b = pair.lighter_market_b in exchange_by_market
 
             if not has_leg_a or not has_leg_b:
                 missing = []
@@ -419,6 +419,11 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                            close_a=close_a, close_b=close_b, market_data=market_data)
                 _notify(f"[{pair.name}] Entry orders accepted but NOT confirmed on exchange. Positions missing: {', '.join(missing)}")
                 return
+
+            # Use exchange avg_entry_price as the true fill price
+            exchange_fill_a = exchange_by_market[pair.lighter_market_a]["entry_price"]
+            exchange_fill_b = exchange_by_market[pair.lighter_market_b]["entry_price"]
+            logger.info(f"[{pair.name}] Exchange entry prices: A={exchange_fill_a}, B={exchange_fill_b}")
 
         # Save open position (re-check to prevent duplicates from race conditions)
         with Session(engine) as session:
@@ -442,8 +447,8 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                 entry_notional=entry.notional,
                 lighter_order_id_a=result_a.order_id,
                 lighter_order_id_b=result_b.order_id,
-                fill_price_a=result_a.filled_price,
-                fill_price_b=result_b.filled_price,
+                fill_price_a=exchange_fill_a if order_mode in ("market", "sliced") else result_a.filled_price,
+                fill_price_b=exchange_fill_b if order_mode in ("market", "sliced") else result_b.filled_price,
                 fill_amount_a=result_a.filled_amount,
                 fill_amount_b=result_b.filled_amount,
             )
@@ -508,6 +513,11 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         units = position.entry_notional / dollar_per_unit if dollar_per_unit > 0 else 0
         fallback_size_a = abs(units)
         fallback_size_b = abs(units * position.entry_hedge_ratio)
+
+        # Snapshot realized PnL before exit (for delta calculation)
+        pnl_before = await lighter_client.get_realized_pnl(
+            [pair.lighter_market_a, pair.lighter_market_b]
+        )
 
         # Fetch actual position sizes from exchange
         exchange_positions = await lighter_client.get_positions()
@@ -602,20 +612,27 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                            close_a=close_a, close_b=close_b)
                 return
 
-        # Compute PnL using actual fill prices when available
-        entry_pa = position.fill_price_a or position.entry_price_a
-        entry_pb = position.fill_price_b or position.entry_price_b
-        exit_pa = result_a.filled_price or current_price_a
-        exit_pb = result_b.filled_price or current_price_b
+        # Compute PnL from exchange realized PnL delta (ground truth)
+        pnl_after = await lighter_client.get_realized_pnl(
+            [pair.lighter_market_a, pair.lighter_market_b]
+        )
+        pnl_delta_a = pnl_after[pair.lighter_market_a] - pnl_before[pair.lighter_market_a]
+        pnl_delta_b = pnl_after[pair.lighter_market_b] - pnl_before[pair.lighter_market_b]
+        pnl = pnl_delta_a + pnl_delta_b
+        logger.info(
+            f"[{pair.name}] Exchange realized PnL delta: "
+            f"A={pnl_delta_a:.2f}, B={pnl_delta_b:.2f}, total={pnl:.2f}"
+        )
 
-        if exit_sig.exit_reason == "stop_loss":
+        if exit_sig.exit_reason == "stop_loss" and pnl == 0:
+            # Fallback if exchange PnL not yet settled
             pnl = -pair.stop_loss_pct / 100 * entry_equity
-        else:
-            pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
-            pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
-            pnl = pnl_a + pnl_b
 
         pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
+
+        # Use stored fill prices for record-keeping
+        entry_pa = position.fill_price_a or position.entry_price_a
+        entry_pb = position.fill_price_b or position.entry_price_b
 
         # Determine duration (approximate in candles — we don't track entry index in live)
         duration = 0
@@ -629,10 +646,10 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                 direction=direction_str,
                 entry_time=position.entry_time,
                 exit_time=datetime.now(timezone.utc),
-                entry_price_a=position.fill_price_a or position.entry_price_a,
-                exit_price_a=result_a.filled_price or current_price_a,
-                entry_price_b=position.fill_price_b or position.entry_price_b,
-                exit_price_b=result_b.filled_price or current_price_b,
+                entry_price_a=entry_pa,
+                exit_price_a=current_price_a,
+                entry_price_b=entry_pb,
+                exit_price_b=current_price_b,
                 size_a=round(size_a, 4),
                 size_b=round(size_b, 4),
                 hedge_ratio=position.entry_hedge_ratio,
