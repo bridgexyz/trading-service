@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../api/client";
 import StatusBadge from "../components/StatusBadge";
 import { formatDateTime } from "../utils/formatDate";
+import { fmtPrice } from "../utils/formatNumber";
 import type { JobLog, TradingPair } from "../types";
 
 export default function LogsPage() {
@@ -83,10 +84,10 @@ export default function LogsPage() {
                   Z: <span className="font-mono text-text-primary">{l.z_score?.toFixed(3) ?? "-"}</span>
                 </span>
                 <span className="text-text-secondary">
-                  A: <span className="font-mono">{l.close_a != null ? (l.close_a < 0.01 ? l.close_a.toFixed(6) : l.close_a.toFixed(2)) : "-"}</span>
+                  A: <span className="font-mono">{l.close_a != null ? fmtPrice(l.close_a) : "-"}</span>
                 </span>
                 <span className="text-text-secondary">
-                  B: <span className="font-mono">{l.close_b != null ? (l.close_b < 0.01 ? l.close_b.toFixed(6) : l.close_b.toFixed(2)) : "-"}</span>
+                  B: <span className="font-mono">{l.close_b != null ? fmtPrice(l.close_b) : "-"}</span>
                 </span>
               </div>
               {l.action && (
@@ -147,18 +148,10 @@ export default function LogsPage() {
                       {l.z_score?.toFixed(3) ?? "-"}
                     </td>
                     <td className="px-5 py-2.5 text-right font-mono text-xs text-text-secondary">
-                      {l.close_a != null
-                        ? l.close_a < 0.01
-                          ? l.close_a.toFixed(6)
-                          : l.close_a.toFixed(2)
-                        : "-"}
+                      {l.close_a != null ? fmtPrice(l.close_a) : "-"}
                     </td>
                     <td className="px-5 py-2.5 text-right font-mono text-xs text-text-secondary">
-                      {l.close_b != null
-                        ? l.close_b < 0.01
-                          ? l.close_b.toFixed(6)
-                          : l.close_b.toFixed(2)
-                        : "-"}
+                      {l.close_b != null ? fmtPrice(l.close_b) : "-"}
                     </td>
                     <td className="px-5 py-2.5 text-text-primary text-xs font-mono">
                       {l.action ?? "-"}

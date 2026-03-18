@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "../api/client";
 import StatusBadge from "../components/StatusBadge";
+import { fmtDollar } from "../utils/formatNumber";
 import type { TradingPair, Credential } from "../types";
 
 const INTERVALS = ["15m", "1h", "2h", "4h", "8h", "1d"];
@@ -432,7 +433,7 @@ export default function PairsPage() {
       <div className="flex items-center gap-3 text-[11px] text-text-muted font-mono">
         <span>{pair.asset_a}/{pair.asset_b}</span>
         <span>{pair.schedule_interval}</span>
-        <span className="text-text-primary">${pair.current_equity.toFixed(0)}</span>
+        <span className="text-text-primary">${fmtDollar(pair.current_equity, 0)}</span>
       </div>
       <div className="flex gap-1.5 pt-1">
         <button
@@ -487,7 +488,7 @@ export default function PairsPage() {
         {pair.schedule_interval}
       </td>
       <td className="px-5 py-3 text-right font-mono text-text-primary">
-        ${pair.current_equity.toFixed(0)}
+        ${fmtDollar(pair.current_equity, 0)}
       </td>
       <td className="px-5 py-3 text-center">
         <StatusBadge status={pair.is_enabled ? "active" : "paused"} />

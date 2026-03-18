@@ -6,7 +6,7 @@ import App from "./App";
 import "./index.css";
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchInterval: 10000 } },
+  defaultOptions: { queries: { refetchInterval: 60000 } },
 });
 
 createRoot(document.getElementById("root")!).render(

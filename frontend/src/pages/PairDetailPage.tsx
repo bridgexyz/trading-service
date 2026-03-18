@@ -12,6 +12,7 @@ import api from "../api/client";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import { formatDateTime } from "../utils/formatDate";
+import { fmtDollar } from "../utils/formatNumber";
 import type { TradingPair, Trade, JobLog } from "../types";
 
 export default function PairDetailPage() {
@@ -113,10 +114,10 @@ export default function PairDetailPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="Equity" value={`$${pair.current_equity.toFixed(0)}`} />
+        <StatCard label="Equity" value={`$${fmtDollar(pair.current_equity, 0)}`} />
         <StatCard
           label="Total PnL"
-          value={`$${totalPnl.toFixed(2)}`}
+          value={`$${fmtDollar(totalPnl)}`}
           color={totalPnl >= 0 ? "text-accent" : "text-negative"}
         />
         <StatCard label="Trades" value={trades?.length ?? 0} />
@@ -205,7 +206,7 @@ export default function PairDetailPage() {
                     t.pnl >= 0 ? "text-accent" : "text-negative"
                   }`}
                 >
-                  ${t.pnl.toFixed(2)}
+                  ${fmtDollar(t.pnl)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
@@ -261,7 +262,7 @@ export default function PairDetailPage() {
                       t.pnl >= 0 ? "text-accent" : "text-negative"
                     }`}
                   >
-                    ${t.pnl.toFixed(2)}
+                    ${fmtDollar(t.pnl)}
                   </td>
                   <td
                     className={`px-5 py-2.5 text-right font-mono text-xs ${

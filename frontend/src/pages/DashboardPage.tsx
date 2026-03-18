@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../api/client";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
+import { fmtDollar, fmtPrice, fmtSize } from "../utils/formatNumber";
 import type { DashboardSummary, TradingPair, ExchangePosition } from "../types";
 
 export default function DashboardPage() {
@@ -41,7 +42,7 @@ export default function DashboardPage() {
           <StatCard label="Total Trades" value={summary.total_trades} />
           <StatCard
             label="Total PnL"
-            value={`$${summary.total_pnl.toFixed(2)}`}
+            value={`$${fmtDollar(summary.total_pnl)}`}
             color={summary.total_pnl >= 0 ? "text-accent" : "text-negative"}
           />
           <StatCard
@@ -96,7 +97,7 @@ export default function DashboardPage() {
                     {pair.asset_a}/{pair.asset_b}
                   </td>
                   <td className="px-5 py-3 text-right font-mono text-text-primary">
-                    ${pair.current_equity.toFixed(0)}
+                    ${fmtDollar(pair.current_equity, 0)}
                   </td>
                   <td className="px-5 py-3 text-center text-text-secondary font-mono text-xs">
                     {pair.schedule_interval}
@@ -171,19 +172,19 @@ export default function DashboardPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3 text-right font-mono text-xs text-text-primary">
-                    {pos.size < 1 ? pos.size.toFixed(6) : pos.size.toFixed(4)}
+                    {fmtSize(pos.size)}
                   </td>
                   <td className="px-5 py-3 text-right font-mono text-xs text-text-secondary">
-                    {pos.entry_price < 0.01 ? pos.entry_price.toFixed(6) : pos.entry_price.toFixed(2)}
+                    {fmtPrice(pos.entry_price)}
                   </td>
                   <td className="px-5 py-3 text-right font-mono text-xs text-text-primary">
-                    {pos.current_price < 0.01 ? pos.current_price.toFixed(6) : pos.current_price.toFixed(2)}
+                    {fmtPrice(pos.current_price)}
                   </td>
                   <td className="px-5 py-3 text-right font-mono text-xs text-text-secondary">
-                    ${pos.notional.toFixed(2)}
+                    ${fmtDollar(pos.notional)}
                   </td>
                   <td className={`px-5 py-3 text-right font-mono text-xs ${pos.unrealized_pnl >= 0 ? "text-accent" : "text-negative"}`}>
-                    {pos.unrealized_pnl >= 0 ? "+" : ""}{pos.unrealized_pnl.toFixed(2)}
+                    {pos.unrealized_pnl >= 0 ? "+" : ""}{fmtDollar(pos.unrealized_pnl)}
                   </td>
                   <td className={`px-5 py-3 text-right font-mono text-xs ${pos.unrealized_pnl_pct >= 0 ? "text-accent" : "text-negative"}`}>
                     {pos.unrealized_pnl_pct >= 0 ? "+" : ""}{pos.unrealized_pnl_pct.toFixed(2)}%
