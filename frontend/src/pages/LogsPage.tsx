@@ -6,24 +6,52 @@ import { formatDateTime } from "../utils/formatDate";
 import { fmtPrice } from "../utils/formatNumber";
 import type { JobLog, TradingPair } from "../types";
 
+const PAGE_SIZE = 50;
+
 export default function LogsPage() {
   const [pairFilter, setPairFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [zMin, setZMin] = useState("");
+  const [zMax, setZMax] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(0);
 
   const { data: pairs } = useQuery<TradingPair[]>({
     queryKey: ["pairs"],
     queryFn: () => api.get("/pairs").then((r) => r.data),
   });
 
-  const params = new URLSearchParams({ limit: "100" });
+  const params = new URLSearchParams({
+    limit: String(PAGE_SIZE),
+    offset: String(page * PAGE_SIZE),
+  });
   if (pairFilter) params.set("pair_id", pairFilter);
   if (statusFilter) params.set("status", statusFilter);
+  if (zMin) params.set("z_min", zMin);
+  if (zMax) params.set("z_max", zMax);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
 
-  const { data: logs } = useQuery<JobLog[]>({
-    queryKey: ["logs", pairFilter, statusFilter],
+  const { data } = useQuery<{ items: JobLog[]; total: number }>({
+    queryKey: ["logs", pairFilter, statusFilter, zMin, zMax, dateFrom, dateTo, page],
     queryFn: () =>
       api.get(`/system/logs?${params}`).then((r) => r.data),
   });
+
+  const logs = data?.items;
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const showFrom = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const showTo = Math.min((page + 1) * PAGE_SIZE, total);
+
+  const resetPage = () => setPage(0);
+
+  const inputCls =
+    "bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0";
+  const selectCls = inputCls;
+
+  const hasAdvancedFilters = zMin || zMax || dateFrom || dateTo;
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -33,29 +61,70 @@ export default function LogsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        <select
-          value={pairFilter}
-          onChange={(e) => setPairFilter(e.target.value)}
-          className="bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
-        >
-          <option value="">All Pairs</option>
-          {pairs?.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0"
-        >
-          <option value="">All Statuses</option>
-          <option value="success">Success</option>
-          <option value="error">Error</option>
-          <option value="skipped">Skipped</option>
-        </select>
+      <div className="space-y-2">
+        <div className="flex gap-2 flex-wrap">
+          <select
+            value={pairFilter}
+            onChange={(e) => { setPairFilter(e.target.value); resetPage(); }}
+            className={selectCls}
+          >
+            <option value="">All Pairs</option>
+            {pairs?.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); resetPage(); }}
+            className={selectCls}
+          >
+            <option value="">All Statuses</option>
+            <option value="success">Success</option>
+            <option value="error">Error</option>
+            <option value="skipped">Skipped</option>
+          </select>
+
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Z Min"
+            value={zMin}
+            onChange={(e) => { setZMin(e.target.value); resetPage(); }}
+            className={`${inputCls} w-20`}
+          />
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Z Max"
+            value={zMax}
+            onChange={(e) => { setZMax(e.target.value); resetPage(); }}
+            className={`${inputCls} w-20`}
+          />
+
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => { setDateFrom(e.target.value); resetPage(); }}
+            className={inputCls}
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => { setDateTo(e.target.value); resetPage(); }}
+            className={inputCls}
+          />
+
+          {hasAdvancedFilters && (
+            <button
+              onClick={() => { setZMin(""); setZMax(""); setDateFrom(""); setDateTo(""); resetPage(); }}
+              className="px-3 py-2 text-[12px] font-mono text-text-secondary hover:text-text-primary transition-colors"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Mobile card layout */}
@@ -171,6 +240,34 @@ export default function LogsPage() {
           )}
         </div>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 0 && (
+        <div className="flex items-center justify-between text-[12px] font-mono text-text-secondary">
+          <span>
+            Showing {showFrom}–{showTo} of {total}
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              disabled={page === 0}
+              onClick={() => setPage((p) => p - 1)}
+              className="px-3 py-1.5 rounded-md border border-border-default bg-surface-2 hover:border-border-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <span className="text-text-primary">
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1.5 rounded-md border border-border-default bg-surface-2 hover:border-border-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

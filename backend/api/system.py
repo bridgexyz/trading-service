@@ -1,10 +1,11 @@
 """System API — health check, scheduler status, job logs, manual trigger, emergency stop."""
 
 import math
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from backend.database import get_session
 from backend.models.job_log import JobLog
@@ -40,16 +41,32 @@ async def trigger_pair(pair_id: int):
 def job_logs(
     pair_id: int | None = None,
     status: str | None = None,
+    z_min: float | None = None,
+    z_max: float | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = 100,
     offset: int = 0,
     session: Session = Depends(get_session),
 ):
-    stmt = select(JobLog).order_by(JobLog.timestamp.desc())
+    base = select(JobLog)
     if pair_id is not None:
-        stmt = stmt.where(JobLog.pair_id == pair_id)
+        base = base.where(JobLog.pair_id == pair_id)
     if status is not None:
-        stmt = stmt.where(JobLog.status == status)
-    stmt = stmt.offset(offset).limit(limit)
+        base = base.where(JobLog.status == status)
+    if z_min is not None:
+        base = base.where(JobLog.z_score >= z_min)
+    if z_max is not None:
+        base = base.where(JobLog.z_score <= z_max)
+    if date_from is not None:
+        base = base.where(JobLog.timestamp >= datetime.fromisoformat(date_from))
+    if date_to is not None:
+        end = datetime.fromisoformat(date_to) + timedelta(days=1)
+        base = base.where(JobLog.timestamp < end)
+
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+
+    stmt = base.order_by(JobLog.timestamp.desc()).offset(offset).limit(limit)
     rows = session.exec(stmt).all()
     # Replace inf/nan with None so JSON serialization doesn't blow up.
     float_fields = ("z_score", "hedge_ratio", "half_life", "adx", "rsi", "close_a", "close_b")
@@ -58,7 +75,7 @@ def job_logs(
             v = getattr(row, f, None)
             if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
                 setattr(row, f, None)
-    return rows
+    return {"items": rows, "total": total}
 
 
 class EmergencyStopRequest(BaseModel):
