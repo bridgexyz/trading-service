@@ -612,7 +612,11 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                            close_a=close_a, close_b=close_b)
                 return
 
-        # Compute PnL from exchange realized PnL delta (ground truth)
+        # Wait for exchange to settle realized PnL (sliced orders need time)
+        if order_mode == "sliced":
+            await asyncio.sleep(5)
+
+        # Compute PnL from exchange realized PnL delta
         pnl_after = await lighter_client.get_realized_pnl(
             [pair.lighter_market_a, pair.lighter_market_b]
         )
@@ -624,15 +628,24 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
             f"A={pnl_delta_a:.2f}, B={pnl_delta_b:.2f}, total={pnl:.2f}"
         )
 
-        if exit_sig.exit_reason == "stop_loss" and pnl == 0:
-            # Fallback if exchange PnL not yet settled
-            pnl = -pair.stop_loss_pct / 100 * entry_equity
+        # Fallback to price-based PnL if exchange delta is 0 (not yet settled)
+        entry_pa = position.entry_price_a
+        entry_pb = position.entry_price_b
+        exit_pa = current_price_a
+        exit_pb = current_price_b
+
+        if pnl == 0:
+            if exit_sig.exit_reason == "stop_loss":
+                pnl = -pair.stop_loss_pct / 100 * entry_equity
+            else:
+                pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
+                pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
+                pnl = pnl_a + pnl_b
+            logger.warning(
+                f"[{pair.name}] Exchange PnL delta was 0, using price-based fallback: ${pnl:.2f}"
+            )
 
         pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
-
-        # Use stored fill prices for record-keeping
-        entry_pa = position.fill_price_a or position.entry_price_a
-        entry_pb = position.fill_price_b or position.entry_price_b
 
         # Determine duration (approximate in candles — we don't track entry index in live)
         duration = 0
@@ -647,9 +660,9 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                 entry_time=position.entry_time,
                 exit_time=datetime.now(timezone.utc),
                 entry_price_a=entry_pa,
-                exit_price_a=current_price_a,
+                exit_price_a=exit_pa,
                 entry_price_b=entry_pb,
-                exit_price_b=current_price_b,
+                exit_price_b=exit_pb,
                 size_a=round(size_a, 4),
                 size_b=round(size_b, 4),
                 hedge_ratio=position.entry_hedge_ratio,
