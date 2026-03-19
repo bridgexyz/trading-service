@@ -39,7 +39,7 @@ export default function PairDetailPage() {
   const { data: logs } = useQuery<JobLog[]>({
     queryKey: ["logs", id],
     queryFn: () =>
-      api.get(`/system/logs?pair_id=${id}&limit=20`).then((r) => r.data),
+      api.get(`/system/logs?pair_id=${id}&limit=20`).then((r) => r.data.items),
   });
 
   const triggerMut = useMutation({
