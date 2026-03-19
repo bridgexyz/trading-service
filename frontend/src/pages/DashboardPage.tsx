@@ -1,12 +1,31 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import api from "../api/client";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import { fmtDollar, fmtPrice, fmtSize } from "../utils/formatNumber";
+import { formatDateTime } from "../utils/formatDate";
 import type { DashboardSummary, TradingPair, ExchangePosition } from "../types";
 
+interface EnrichedPosition {
+  id: number;
+  pair_id: number;
+  pair_name: string;
+  direction: number;
+  entry_z: number;
+  entry_price_a: number;
+  entry_price_b: number;
+  current_price_a: number;
+  current_price_b: number;
+  entry_notional: number;
+  entry_time: string;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+}
+
 export default function DashboardPage() {
+  const queryClient = useQueryClient();
+
   const { data: summary } = useQuery<DashboardSummary>({
     queryKey: ["dashboard"],
     queryFn: () => api.get("/dashboard/summary").then((r) => r.data),
@@ -24,6 +43,19 @@ export default function DashboardPage() {
   } = useQuery<ExchangePosition[]>({
     queryKey: ["positions-exchange"],
     queryFn: () => api.get("/positions/exchange").then((r) => r.data),
+  });
+
+  const { data: dbPositions } = useQuery<EnrichedPosition[]>({
+    queryKey: ["positions-enriched"],
+    queryFn: () => api.get("/positions/enriched").then((r) => r.data),
+  });
+
+  const clearPositionMut = useMutation({
+    mutationFn: (pairId: number) => api.post(`/positions/${pairId}/close`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["positions-enriched"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 
   return (
@@ -128,6 +160,62 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* DB Positions — controls entry/exit mode */}
+      {dbPositions && dbPositions.length > 0 && (
+        <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-border-default">
+            <h3 className="text-[11px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">
+              Tracked Positions
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-border-default">
+                  <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Pair</th>
+                  <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Direction</th>
+                  <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Entry Z</th>
+                  <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Notional</th>
+                  <th className="text-right px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Unreal. P&L</th>
+                  <th className="text-left px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]">Entry Time</th>
+                  <th className="text-center px-5 py-2.5 text-[10px] font-mono font-medium text-text-secondary uppercase tracking-[0.15em]"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {dbPositions.map((pos) => (
+                  <tr key={pos.id} className="border-b border-border-default/50 hover:bg-surface-2/30">
+                    <td className="px-5 py-3 text-text-primary font-medium">{pos.pair_name}</td>
+                    <td className="px-5 py-3 text-center">
+                      <span className={pos.direction === 1 ? "text-accent" : "text-negative"}>
+                        {pos.direction === 1 ? "Long" : "Short"}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono text-xs text-text-primary">{pos.entry_z.toFixed(3)}</td>
+                    <td className="px-5 py-3 text-right font-mono text-xs text-text-secondary">${fmtDollar(pos.entry_notional)}</td>
+                    <td className={`px-5 py-3 text-right font-mono text-xs ${pos.unrealized_pnl >= 0 ? "text-accent" : "text-negative"}`}>
+                      {pos.unrealized_pnl >= 0 ? "+" : ""}{fmtDollar(pos.unrealized_pnl)} ({pos.unrealized_pnl_pct >= 0 ? "+" : ""}{pos.unrealized_pnl_pct.toFixed(2)}%)
+                    </td>
+                    <td className="px-5 py-3 text-text-secondary text-xs font-mono whitespace-nowrap">{formatDateTime(pos.entry_time)}</td>
+                    <td className="px-5 py-3 text-center">
+                      <button
+                        onClick={() => {
+                          if (confirm(`Clear tracked position for ${pos.pair_name}? This resets the pair to entry mode.`))
+                            clearPositionMut.mutate(pos.pair_id);
+                        }}
+                        disabled={clearPositionMut.isPending}
+                        className="text-[11px] text-negative hover:text-red-400 transition-colors font-medium disabled:opacity-50"
+                      >
+                        Clear
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Positions table — live from exchange */}
       <div className="bg-surface-1 border border-border-default rounded-lg overflow-hidden">

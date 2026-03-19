@@ -39,8 +39,9 @@ def close_position(pair_id: int, session: Session = Depends(get_session)):
     if not pos:
         raise HTTPException(status_code=404, detail="No open position for this pair")
 
-    # TODO Phase 4: actually send closing orders to Lighter, create Trade record
-    return {"status": "pending", "message": "Manual close will be implemented in Phase 4."}
+    session.delete(pos)
+    session.commit()
+    return {"status": "ok", "message": f"Position for pair {pair_id} removed. Pair will return to entry mode."}
 
 
 @router.get("/enriched")
