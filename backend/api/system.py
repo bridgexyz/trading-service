@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func as sa_func
 from sqlmodel import Session, func, select
 
 from backend.database import get_session
@@ -55,9 +56,9 @@ def job_logs(
     if status is not None:
         base = base.where(JobLog.status == status)
     if z_min is not None:
-        base = base.where(JobLog.z_score >= z_min)
+        base = base.where(sa_func.abs(JobLog.z_score) >= z_min)
     if z_max is not None:
-        base = base.where(JobLog.z_score <= z_max)
+        base = base.where(sa_func.abs(JobLog.z_score) <= z_max)
     if date_from is not None:
         base = base.where(JobLog.timestamp >= datetime.fromisoformat(date_from))
     if date_to is not None:

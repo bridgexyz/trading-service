@@ -89,7 +89,7 @@ export default function LogsPage() {
           <input
             type="text"
             inputMode="decimal"
-            placeholder="Z Min"
+            placeholder="|Z| Min"
             value={zMin}
             onChange={(e) => { setZMin(e.target.value); resetPage(); }}
             className={`${inputCls} w-20`}
@@ -97,7 +97,7 @@ export default function LogsPage() {
           <input
             type="text"
             inputMode="decimal"
-            placeholder="Z Max"
+            placeholder="|Z| Max"
             value={zMax}
             onChange={(e) => { setZMax(e.target.value); resetPage(); }}
             className={`${inputCls} w-20`}
