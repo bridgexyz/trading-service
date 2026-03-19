@@ -90,6 +90,18 @@ def _run_migrations():
                         ))
                     conn.commit()
 
+    # Add exit_schedule_interval and use_exit_schedule columns
+    if "exit_schedule_interval" not in columns:
+        logger.info("Migrating: adding exit_schedule_interval column")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN exit_schedule_interval VARCHAR NOT NULL DEFAULT '15m'"))
+            conn.commit()
+    if "use_exit_schedule" not in columns:
+        logger.info("Migrating: adding use_exit_schedule column")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN use_exit_schedule BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

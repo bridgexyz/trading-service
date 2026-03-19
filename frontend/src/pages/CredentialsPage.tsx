@@ -102,10 +102,15 @@ export default function CredentialsPage() {
                 API Key Index
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 value={form.api_key_index}
-                onChange={(e) => setForm({ ...form, api_key_index: Number(e.target.value) })}
-                className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-20 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "" || /^\d+$/.test(v)) setForm({ ...form, api_key_index: v === "" ? 0 : Number(v) });
+                }}
+                onWheel={(e) => e.currentTarget.blur()}
+                className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-20"
               />
             </div>
             <div>

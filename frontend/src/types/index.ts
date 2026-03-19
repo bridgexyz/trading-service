@@ -25,6 +25,8 @@ export interface TradingPair {
   slice_delay_sec: number;
   min_equity_pct: number;
   schedule_interval: string;
+  exit_schedule_interval: string;
+  use_exit_schedule: boolean;
   is_enabled: boolean;
   credential_id: number | null;
   current_equity: number;

@@ -78,12 +78,21 @@ def reschedule_pair_job(pair_id: int, schedule_interval: str):
 
 def start_scheduler():
     """Start the scheduler and load all enabled pairs."""
+    from backend.models.position import OpenPosition
+
     with Session(engine) as session:
         pairs = session.exec(
             select(TradingPair).where(TradingPair.is_enabled == True)
         ).all()
         for pair in pairs:
-            add_pair_job(pair.id, pair.schedule_interval)
+            interval = pair.schedule_interval
+            if pair.use_exit_schedule:
+                has_pos = session.exec(
+                    select(OpenPosition).where(OpenPosition.pair_id == pair.id)
+                ).first()
+                if has_pos:
+                    interval = pair.exit_schedule_interval
+            add_pair_job(pair.id, interval)
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

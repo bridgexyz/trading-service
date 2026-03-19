@@ -33,6 +33,8 @@ class TradingPairCreate(BaseModel):
     slice_delay_sec: float = Field(default=2.0, ge=0.5, le=30)
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
     schedule_interval: str = "15m"
+    exit_schedule_interval: str = "15m"
+    use_exit_schedule: bool = False
     is_enabled: bool = True
     credential_id: int | None = None
 
@@ -52,7 +54,7 @@ class TradingPairCreate(BaseModel):
             raise ValueError(f"must be one of: {allowed}")
         return value
 
-    @field_validator("schedule_interval")
+    @field_validator("schedule_interval", "exit_schedule_interval")
     @classmethod
     def _validate_schedule_interval(cls, value: str) -> str:
         import re
@@ -98,6 +100,8 @@ class TradingPairUpdate(BaseModel):
     slice_delay_sec: float | None = Field(default=None, ge=0.5, le=30)
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
     schedule_interval: str | None = None
+    exit_schedule_interval: str | None = None
+    use_exit_schedule: bool | None = None
     is_enabled: bool | None = None
     credential_id: int | None = None
 
@@ -121,7 +125,7 @@ class TradingPairUpdate(BaseModel):
             raise ValueError(f"must be one of: {allowed}")
         return value
 
-    @field_validator("schedule_interval")
+    @field_validator("schedule_interval", "exit_schedule_interval")
     @classmethod
     def _validate_optional_schedule_interval(cls, value: str | None) -> str | None:
         if value is None:
@@ -178,6 +182,8 @@ class TradingPairRead(BaseModel):
     slice_delay_sec: float
     min_equity_pct: float
     schedule_interval: str
+    exit_schedule_interval: str
+    use_exit_schedule: bool
     is_enabled: bool
     credential_id: int | None
     current_equity: float

@@ -45,6 +45,8 @@ class TradingPair(SQLModel, table=True):
 
     # Scheduling
     schedule_interval: str = "15m"
+    exit_schedule_interval: str = "15m"
+    use_exit_schedule: bool = False
     is_enabled: bool = True
 
     # Credential assignment (None = use first active credential)

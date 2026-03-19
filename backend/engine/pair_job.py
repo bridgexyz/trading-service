@@ -463,6 +463,12 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                     close_a=close_a, close_b=close_b, market_data=market_data,
                     order_results=_build_order_results(result_a, result_b))
 
+        # Reschedule to exit interval if separate exit schedule is enabled
+        if pair.use_exit_schedule and pair.exit_schedule_interval:
+            from backend.engine.scheduler import reschedule_pair_job
+            reschedule_pair_job(pair.id, pair.exit_schedule_interval)
+            logger.info(f"[{pair.name}] Rescheduled to exit interval: {pair.exit_schedule_interval}")
+
     finally:
         await lighter_client.close()
 
@@ -700,6 +706,12 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                     message=f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)",
                     close_a=close_a, close_b=close_b, market_data=market_data,
                     order_results=_build_order_results(result_a, result_b))
+
+        # Reschedule back to entry interval if separate exit schedule is enabled
+        if pair.use_exit_schedule:
+            from backend.engine.scheduler import reschedule_pair_job
+            reschedule_pair_job(pair.id, pair.schedule_interval)
+            logger.info(f"[{pair.name}] Rescheduled to entry interval: {pair.schedule_interval}")
 
     finally:
         await lighter_client.close()

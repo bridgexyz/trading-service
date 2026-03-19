@@ -47,6 +47,17 @@ def create_pair(
     return pair
 
 
+def _effective_interval(pair: TradingPair, session: Session) -> str:
+    """Return the exit interval if use_exit_schedule is on and a position exists."""
+    if pair.use_exit_schedule:
+        has_pos = session.exec(
+            select(OpenPosition).where(OpenPosition.pair_id == pair.id)
+        ).first()
+        if has_pos:
+            return pair.exit_schedule_interval
+    return pair.schedule_interval
+
+
 @router.get("/{pair_id}", response_model=TradingPairRead)
 def get_pair(pair_id: int, session: Session = Depends(get_session)):
     pair = session.get(TradingPair, pair_id)
@@ -85,7 +96,7 @@ def update_pair(
     # Reschedule if interval changed or enablement toggled
     from backend.engine.scheduler import add_pair_job, remove_pair_job
     if pair.is_enabled:
-        add_pair_job(pair.id, pair.schedule_interval)
+        add_pair_job(pair.id, _effective_interval(pair, session))
     else:
         remove_pair_job(pair.id)
 
@@ -129,7 +140,7 @@ def toggle_pair(pair_id: int, session: Session = Depends(get_session)):
 
     from backend.engine.scheduler import add_pair_job, remove_pair_job
     if pair.is_enabled:
-        add_pair_job(pair.id, pair.schedule_interval)
+        add_pair_job(pair.id, _effective_interval(pair, session))
     else:
         remove_pair_job(pair.id)
 

@@ -36,12 +36,14 @@ const defaultPair = {
   slice_chunks: 10,
   slice_delay_sec: 2.0,
   schedule_interval: 10,
+  exit_schedule_interval: 10,
+  use_exit_schedule: false,
   is_enabled: true,
   credential_id: null as number | null,
 };
 
 type FormData = typeof defaultPair;
-type SubmitData = Omit<FormData, "schedule_interval"> & { name: string; train_interval: string; schedule_interval: string };
+type SubmitData = Omit<FormData, "schedule_interval" | "exit_schedule_interval"> & { name: string; train_interval: string; schedule_interval: string; exit_schedule_interval: string };
 
 function SectionLabel({ children }: { children: string }) {
   return (
@@ -55,29 +57,39 @@ function Field({
   label,
   value,
   onChange,
-  type = "number",
   w = "w-24",
 }: {
   label: string;
   value: string | number;
   onChange: (v: string | number) => void;
-  type?: string;
   w?: string;
 }) {
+  const [touched, setTouched] = useState(false);
+  const isEmpty = value === "" || value === undefined;
+  const showError = touched && isEmpty;
+
   return (
     <div>
       <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
         {label}
       </label>
       <input
-        type={type}
-        step={type === "number" ? "any" : undefined}
+        type="text"
+        inputMode="decimal"
         value={value}
-        onChange={(e) =>
-          onChange(type === "number" ? Number(e.target.value) : e.target.value)
-        }
-        className={`bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${w}`}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+          if (e.key === "-" && e.currentTarget.selectionStart === 0 && !e.currentTarget.value.includes("-")) return;
+          if (e.key === "." && !e.currentTarget.value.includes(".")) return;
+          if (/^\d$/.test(e.key)) return;
+          e.preventDefault();
+        }}
+        onWheel={(e) => e.currentTarget.blur()}
+        onBlur={() => setTouched(true)}
+        className={`bg-surface-2/80 border ${showError ? "border-red-500" : "border-border-default"} rounded-md px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all ${w}`}
       />
+      {showError && <span className="text-[10px] text-red-400 mt-0.5 block">Required</span>}
     </div>
   );
 }
@@ -199,8 +211,21 @@ function PairForm({
     setForm((f) => ({ ...f, [key]: value }));
 
   const handleSubmit = () => {
+    const numericKeys = ["entry_z","exit_z","stop_z","window_candles","train_candles",
+      "max_half_life","rsi_upper","rsi_lower","rsi_period","stop_loss_pct",
+      "position_size_pct","leverage","schedule_interval"] as const;
+    const invalid = numericKeys.filter(k => String(form[k]) === "" || isNaN(Number(form[k])));
+    if (invalid.length > 0) return;
+    if (form.use_exit_schedule && (String(form.exit_schedule_interval) === "" || isNaN(Number(form.exit_schedule_interval)))) return;
+
     const name = `${form.asset_a}-${form.asset_b}`;
-    onSubmit({ ...form, schedule_interval: `${form.schedule_interval}m`, train_interval: form.window_interval, name });
+    onSubmit({
+      ...form,
+      schedule_interval: `${form.schedule_interval}m`,
+      exit_schedule_interval: `${form.exit_schedule_interval}m`,
+      train_interval: form.window_interval,
+      name,
+    });
   };
 
   return (
@@ -274,7 +299,28 @@ function PairForm({
 
       <SectionLabel>Schedule & Credential</SectionLabel>
       <div className="flex flex-wrap gap-3 items-end">
-        <Field label="Schedule Interval (min)" value={form.schedule_interval} onChange={(v) => set("schedule_interval", v)} />
+        <Field label={form.use_exit_schedule ? "Entry Interval (min)" : "Schedule Interval (min)"} value={form.schedule_interval} onChange={(v) => set("schedule_interval", v)} />
+        <div>
+          <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+            Exit Schedule
+          </label>
+          <button
+            type="button"
+            onClick={() => set("use_exit_schedule", !form.use_exit_schedule)}
+            className={`w-11 h-6 rounded-full transition-all relative ${
+              form.use_exit_schedule ? "bg-accent shadow-[0_0_10px_var(--color-accent)/30]" : "bg-surface-3 border border-border-default"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform shadow-sm ${
+                form.use_exit_schedule ? "left-5.5" : "left-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        {form.use_exit_schedule && (
+          <Field label="Exit Interval (min)" value={form.exit_schedule_interval} onChange={(v) => set("exit_schedule_interval", v)} />
+        )}
         <div>
           <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
             Credential
@@ -409,6 +455,8 @@ export default function PairsPage() {
     slice_chunks: pair.slice_chunks ?? 10,
     slice_delay_sec: pair.slice_delay_sec ?? 2.0,
     schedule_interval: parseInt(pair.schedule_interval) || 10,
+    exit_schedule_interval: parseInt(pair.exit_schedule_interval) || 10,
+    use_exit_schedule: pair.use_exit_schedule ?? false,
     is_enabled: pair.is_enabled,
     credential_id: pair.credential_id,
   });
@@ -486,6 +534,7 @@ export default function PairsPage() {
       </td>
       <td className="px-5 py-3 text-center text-text-secondary font-mono text-xs">
         {pair.schedule_interval}
+        {pair.use_exit_schedule && <span className="text-text-muted"> / {pair.exit_schedule_interval}</span>}
       </td>
       <td className="px-5 py-3 text-right font-mono text-text-primary">
         ${fmtDollar(pair.current_equity, 0)}
