@@ -76,9 +76,40 @@ def reschedule_pair_job(pair_id: int, schedule_interval: str):
         add_pair_job(pair_id, schedule_interval)
 
 
+GUARDIAN_JOB_ID = "stop_loss_guardian"
+
+
+def add_guardian_job(interval_seconds: int):
+    """Add or replace the global stop-loss guardian job."""
+    from backend.engine.stop_loss_guardian import run_stop_loss_check
+
+    if scheduler.get_job(GUARDIAN_JOB_ID):
+        scheduler.remove_job(GUARDIAN_JOB_ID)
+
+    scheduler.add_job(
+        run_stop_loss_check,
+        trigger=IntervalTrigger(seconds=interval_seconds),
+        id=GUARDIAN_JOB_ID,
+        name="Stop-Loss Guardian",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
+    logger.info(f"Guardian job scheduled every {interval_seconds}s")
+
+
+def remove_guardian_job():
+    """Remove the guardian job if running."""
+    if scheduler.get_job(GUARDIAN_JOB_ID):
+        scheduler.remove_job(GUARDIAN_JOB_ID)
+        logger.info("Guardian job removed")
+
+
 def start_scheduler():
     """Start the scheduler and load all enabled pairs."""
     from backend.models.position import OpenPosition
+    from backend.models.guardian_settings import GuardianSettings
 
     with Session(engine) as session:
         pairs = session.exec(
@@ -93,6 +124,11 @@ def start_scheduler():
                 if has_pos:
                     interval = pair.exit_schedule_interval
             add_pair_job(pair.id, interval)
+
+        # Start guardian job if enabled
+        guardian = session.get(GuardianSettings, 1)
+        if guardian and guardian.enabled:
+            add_guardian_job(guardian.interval_seconds)
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

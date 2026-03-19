@@ -28,6 +28,7 @@ export interface TradingPair {
   exit_schedule_interval: string;
   use_exit_schedule: boolean;
   is_enabled: boolean;
+  guardian_excluded: boolean;
   credential_id: number | null;
   current_equity: number;
   created_at: string;
@@ -149,4 +150,21 @@ export interface EmergencyStopResponse {
   positions_closed: number;
   errors: string[];
   pairs_disabled: number;
+}
+
+export interface GuardianSettings {
+  id: number;
+  enabled: boolean;
+  interval_seconds: number;
+  stop_loss_pct_override: number | null;
+  updated_at: string;
+}
+
+export interface GuardianStatus {
+  enabled: boolean;
+  interval_seconds: number;
+  job_running: boolean;
+  next_run: string | null;
+  trigger: string | null;
+  monitored_positions: number;
 }

@@ -506,7 +506,30 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         )
         return
 
-    # Place closing orders (reverse of entry)
+    await execute_exit(
+        pair, position, current_price_a, current_price_b,
+        exit_reason=exit_sig.exit_reason,
+        signals=signals, market_data=market_data,
+    )
+
+
+async def execute_exit(
+    pair: TradingPair,
+    position: OpenPosition,
+    current_price_a: float,
+    current_price_b: float,
+    exit_reason: str,
+    signals=None,
+    market_data: dict | None = None,
+):
+    """Shared exit helper — places closing orders, records trade, cleans up position.
+
+    Called by both _handle_exit (signal-based) and the stop-loss guardian.
+    """
+    close_a = current_price_a
+    close_b = current_price_b
+    entry_equity = position.entry_notional / pair.leverage if pair.leverage > 0 else position.entry_notional
+
     lighter_client = await _get_lighter_client(pair.credential_id)
     if lighter_client is None:
         _log_cycle(pair.id, "error", signals=signals, message="No active credential for exit",
@@ -641,7 +664,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         exit_pb = current_price_b
 
         if pnl == 0:
-            if exit_sig.exit_reason == "stop_loss":
+            if exit_reason == "stop_loss":
                 pnl = -pair.stop_loss_pct / 100 * entry_equity
             else:
                 pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
@@ -674,7 +697,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
                 hedge_ratio=position.entry_hedge_ratio,
                 pnl=round(pnl, 2),
                 pnl_pct=round(pnl_pct, 2),
-                exit_reason=exit_sig.exit_reason or "unknown",
+                exit_reason=exit_reason or "unknown",
                 duration_candles=duration,
             )
             session.add(trade)
@@ -700,9 +723,9 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
 
             session.commit()
 
-        logger.info(f"[{pair.name}] Exited ({exit_sig.exit_reason}): PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
-        _notify(f"[{pair.name}] Exit ({exit_sig.exit_reason}) | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
-        _log_cycle(pair.id, "success", signals=signals, action=f"exit:{exit_sig.exit_reason}",
+        logger.info(f"[{pair.name}] Exited ({exit_reason}): PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+        _notify(f"[{pair.name}] Exit ({exit_reason}) | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
+        _log_cycle(pair.id, "success", signals=signals, action=f"exit:{exit_reason}",
                     message=f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)",
                     close_a=close_a, close_b=close_b, market_data=market_data,
                     order_results=_build_order_results(result_a, result_b))

@@ -7,6 +7,7 @@ from backend.models.equity_snapshot import EquitySnapshot
 from backend.models.job_log import JobLog
 from backend.models.credential import Credential
 from backend.models.user import User
+from backend.models.guardian_settings import GuardianSettings
 
 __all__ = [
     "TradingPair",
@@ -16,4 +17,5 @@ __all__ = [
     "JobLog",
     "Credential",
     "User",
+    "GuardianSettings",
 ]

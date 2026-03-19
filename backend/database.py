@@ -102,6 +102,13 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE trading_pair ADD COLUMN use_exit_schedule BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.commit()
 
+    # Add guardian_excluded column for per-pair guardian opt-out
+    if "guardian_excluded" not in columns:
+        logger.info("Migrating: adding guardian_excluded column to trading_pair")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN guardian_excluded BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")
@@ -119,6 +126,7 @@ def _run_migrations():
 
 def create_db_and_tables():
     """Create all tables. Called on startup."""
+    import backend.models  # noqa: F401 — ensure all models are registered
     SQLModel.metadata.create_all(engine)
     _run_migrations()
 

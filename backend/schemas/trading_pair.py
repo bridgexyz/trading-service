@@ -36,6 +36,7 @@ class TradingPairCreate(BaseModel):
     exit_schedule_interval: str = "15m"
     use_exit_schedule: bool = False
     is_enabled: bool = True
+    guardian_excluded: bool = False
     credential_id: int | None = None
 
     @field_validator("asset_a", "asset_b")
@@ -103,6 +104,7 @@ class TradingPairUpdate(BaseModel):
     exit_schedule_interval: str | None = None
     use_exit_schedule: bool | None = None
     is_enabled: bool | None = None
+    guardian_excluded: bool | None = None
     credential_id: int | None = None
 
     @field_validator("name", "asset_a", "asset_b")
@@ -185,6 +187,7 @@ class TradingPairRead(BaseModel):
     exit_schedule_interval: str
     use_exit_schedule: bool
     is_enabled: bool
+    guardian_excluded: bool
     credential_id: int | None
     current_equity: float
     created_at: datetime
