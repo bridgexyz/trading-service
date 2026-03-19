@@ -99,7 +99,7 @@ def _run_migrations():
     if "use_exit_schedule" not in columns:
         logger.info("Migrating: adding use_exit_schedule column")
         with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN use_exit_schedule BOOLEAN NOT NULL DEFAULT 0"))
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN use_exit_schedule BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.commit()
 
     # Ensure unique constraint on open_position.pair_id
