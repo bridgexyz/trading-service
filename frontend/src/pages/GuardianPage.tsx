@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import type { GuardianSettings, GuardianStatus, TradingPair } from "../types";
+import type { GuardianSettings, GuardianStatus, TradingPair, JobLog } from "../types";
 
 function Toggle({
   checked,
@@ -37,6 +37,12 @@ export default function GuardianPage() {
   const { data: status } = useQuery<GuardianStatus>({
     queryKey: ["guardian-status"],
     queryFn: () => api.get("/guardian/status").then((r) => r.data),
+    refetchInterval: 15000,
+  });
+
+  const { data: logs } = useQuery<JobLog[]>({
+    queryKey: ["guardian-logs"],
+    queryFn: () => api.get("/guardian/logs").then((r) => r.data),
     refetchInterval: 15000,
   });
 
@@ -309,6 +315,62 @@ export default function GuardianPage() {
                 </label>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Logs */}
+      <div className="bg-surface-1 border border-border-default rounded-lg p-5">
+        <h3 className="text-sm font-semibold tracking-tight mb-3">
+          Recent Logs
+        </h3>
+
+        {!logs || logs.length === 0 ? (
+          <p className="text-[13px] text-text-muted py-4 text-center">
+            No guardian logs yet
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {logs.map((log) => {
+              const pair = pairs?.find((p) => p.id === log.pair_id);
+              const isError = log.status === "error";
+              return (
+                <div
+                  key={log.id}
+                  className="flex items-start gap-3 px-3 py-2.5 rounded-md bg-surface-2/30"
+                >
+                  <span
+                    className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                      isError ? "bg-negative" : "bg-accent"
+                    }`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[11px] font-mono text-text-muted">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </span>
+                      {pair && (
+                        <span className="text-[11px] font-mono text-text-secondary">
+                          {pair.name}
+                        </span>
+                      )}
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          isError
+                            ? "bg-negative/10 text-negative"
+                            : "bg-accent/10 text-accent"
+                        }`}
+                      >
+                        {log.action?.replace("guardian_", "")}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-text-secondary truncate">
+                      {log.message}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

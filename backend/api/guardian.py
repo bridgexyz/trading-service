@@ -71,6 +71,19 @@ def update_settings(
     return settings
 
 
+@router.get("/logs")
+def guardian_logs(session: Session = Depends(get_session)):
+    from backend.models.job_log import JobLog
+
+    logs = session.exec(
+        select(JobLog)
+        .where(JobLog.action.like("guardian_%"))
+        .order_by(JobLog.timestamp.desc())
+        .limit(24)
+    ).all()
+    return logs
+
+
 @router.get("/status")
 def guardian_status(session: Session = Depends(get_session)):
     from backend.engine.scheduler import scheduler, GUARDIAN_JOB_ID
