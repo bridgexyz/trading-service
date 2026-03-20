@@ -116,7 +116,7 @@ def _run_migrations():
             logger.info("Migrating: guardian_settings interval_seconds -> interval_minutes")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE guardian_settings ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 1"))
-                conn.execute(text("UPDATE guardian_settings SET interval_minutes = MAX(1, interval_seconds / 60)"))
+                conn.execute(text("UPDATE guardian_settings SET interval_minutes = GREATEST(1, interval_seconds / 60)"))
                 conn.commit()
 
     # Ensure unique constraint on open_position.pair_id
