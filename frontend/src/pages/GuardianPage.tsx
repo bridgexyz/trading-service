@@ -47,7 +47,7 @@ export default function GuardianPage() {
 
   const [form, setForm] = useState({
     enabled: true,
-    interval_seconds: 60,
+    interval_minutes: 1,
     stop_loss_pct_override: null as number | null,
   });
 
@@ -55,7 +55,7 @@ export default function GuardianPage() {
     if (settings) {
       setForm({
         enabled: settings.enabled,
-        interval_seconds: settings.interval_seconds,
+        interval_minutes: settings.interval_minutes,
         stop_loss_pct_override: settings.stop_loss_pct_override,
       });
     }
@@ -84,7 +84,7 @@ export default function GuardianPage() {
   const handleSave = () => {
     updateMut.mutate({
       enabled: form.enabled,
-      interval_seconds: form.interval_seconds,
+      interval_minutes: form.interval_minutes,
       stop_loss_pct_override: form.stop_loss_pct_override,
     });
   };
@@ -140,24 +140,24 @@ export default function GuardianPage() {
           {/* Interval */}
           <div>
             <label className="text-[10px] text-text-muted uppercase tracking-[0.12em] block mb-1.5 font-mono">
-              Check Interval (seconds)
+              Check Interval (minutes)
             </label>
             <input
               type="number"
-              min={10}
-              max={300}
-              value={form.interval_seconds}
+              min={1}
+              max={15}
+              value={form.interval_minutes}
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  interval_seconds: Number(e.target.value),
+                  interval_minutes: Number(e.target.value),
                 }))
               }
               onWheel={(e) => e.currentTarget.blur()}
               className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-28"
             />
             <p className="text-[11px] text-text-muted mt-1">
-              Range: 10-300 seconds
+              Range: 1-15 minutes
             </p>
           </div>
 
@@ -242,7 +242,7 @@ export default function GuardianPage() {
               Interval
             </div>
             <div className="text-lg font-semibold text-text-primary font-mono">
-              {status?.interval_seconds ?? "-"}s
+              {status?.interval_minutes ?? "-"}m
             </div>
           </div>
           <div>

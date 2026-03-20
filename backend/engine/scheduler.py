@@ -79,7 +79,7 @@ def reschedule_pair_job(pair_id: int, schedule_interval: str):
 GUARDIAN_JOB_ID = "stop_loss_guardian"
 
 
-def add_guardian_job(interval_seconds: int):
+def add_guardian_job(interval_minutes: int):
     """Add or replace the global stop-loss guardian job."""
     from backend.engine.stop_loss_guardian import run_stop_loss_check
 
@@ -88,7 +88,7 @@ def add_guardian_job(interval_seconds: int):
 
     scheduler.add_job(
         run_stop_loss_check,
-        trigger=IntervalTrigger(seconds=interval_seconds),
+        trigger=IntervalTrigger(minutes=interval_minutes),
         id=GUARDIAN_JOB_ID,
         name="Stop-Loss Guardian",
         replace_existing=True,
@@ -96,7 +96,7 @@ def add_guardian_job(interval_seconds: int):
         coalesce=True,
         misfire_grace_time=30,
     )
-    logger.info(f"Guardian job scheduled every {interval_seconds}s")
+    logger.info(f"Guardian job scheduled every {interval_minutes}m")
 
 
 def remove_guardian_job():
@@ -128,7 +128,7 @@ def start_scheduler():
         # Start guardian job if enabled
         guardian = session.get(GuardianSettings, 1)
         if guardian and guardian.enabled:
-            add_guardian_job(guardian.interval_seconds)
+            add_guardian_job(guardian.interval_minutes)
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

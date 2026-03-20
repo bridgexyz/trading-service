@@ -109,6 +109,16 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE trading_pair ADD COLUMN guardian_excluded BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.commit()
 
+    # Migrate guardian_settings.interval_seconds -> interval_minutes
+    if "guardian_settings" in inspector.get_table_names():
+        gs_columns = {col["name"] for col in inspector.get_columns("guardian_settings")}
+        if "interval_seconds" in gs_columns and "interval_minutes" not in gs_columns:
+            logger.info("Migrating: guardian_settings interval_seconds -> interval_minutes")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE guardian_settings ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 1"))
+                conn.execute(text("UPDATE guardian_settings SET interval_minutes = MAX(1, interval_seconds / 60)"))
+                conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

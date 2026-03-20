@@ -155,14 +155,14 @@ export interface EmergencyStopResponse {
 export interface GuardianSettings {
   id: number;
   enabled: boolean;
-  interval_seconds: number;
+  interval_minutes: number;
   stop_loss_pct_override: number | null;
   updated_at: string;
 }
 
 export interface GuardianStatus {
   enabled: boolean;
-  interval_seconds: number;
+  interval_minutes: number;
   job_running: boolean;
   next_run: string | null;
   trigger: string | null;

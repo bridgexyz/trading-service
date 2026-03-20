@@ -37,7 +37,7 @@ def get_settings(session: Session = Depends(get_session)):
 
 class GuardianSettingsUpdate(BaseModel):
     enabled: bool | None = None
-    interval_seconds: int | None = None
+    interval_minutes: int | None = None
     stop_loss_pct_override: float | None = None
 
 
@@ -50,8 +50,8 @@ def update_settings(
 
     if body.enabled is not None:
         settings.enabled = body.enabled
-    if body.interval_seconds is not None:
-        settings.interval_seconds = max(10, min(body.interval_seconds, 300))
+    if body.interval_minutes is not None:
+        settings.interval_minutes = max(1, min(body.interval_minutes, 15))
     # stop_loss_pct_override: allow setting to None (clear) or a value
     if "stop_loss_pct_override" in body.model_fields_set:
         settings.stop_loss_pct_override = body.stop_loss_pct_override
@@ -64,7 +64,7 @@ def update_settings(
     # Update scheduler
     from backend.engine.scheduler import add_guardian_job, remove_guardian_job
     if settings.enabled:
-        add_guardian_job(settings.interval_seconds)
+        add_guardian_job(settings.interval_minutes)
     else:
         remove_guardian_job()
 
@@ -88,7 +88,7 @@ def guardian_status(session: Session = Depends(get_session)):
 
     return {
         "enabled": settings.enabled,
-        "interval_seconds": settings.interval_seconds,
+        "interval_minutes": settings.interval_minutes,
         "job_running": job is not None,
         "next_run": str(job.next_run_time) if job and job.next_run_time else None,
         "trigger": str(job.trigger) if job else None,
