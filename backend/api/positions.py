@@ -39,8 +39,15 @@ def close_position(pair_id: int, session: Session = Depends(get_session)):
     if not pos:
         raise HTTPException(status_code=404, detail="No open position for this pair")
 
+    pair = session.get(TradingPair, pair_id)
     session.delete(pos)
     session.commit()
+
+    # Reschedule job back to entry interval if use_exit_schedule is on
+    if pair and pair.use_exit_schedule and pair.is_enabled:
+        from backend.engine.scheduler import reschedule_pair_job
+        reschedule_pair_job(pair.id, pair.schedule_interval)
+
     return {"status": "ok", "message": f"Position for pair {pair_id} removed. Pair will return to entry mode."}
 
 
