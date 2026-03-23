@@ -482,7 +482,8 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
     # not pair.current_equity which could be inflated by deposits.
     entry_equity = position.entry_notional / pair.leverage if pair.leverage > 0 else position.entry_notional
 
-    hours_held = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
+    entry_time = position.entry_time if position.entry_time.tzinfo else position.entry_time.replace(tzinfo=timezone.utc)
+    hours_held = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
     exit_z = pair.exit_z_late if hours_held >= 8 else pair.exit_z_early
 
     exit_sig = signal_engine.evaluate_exit(
@@ -681,7 +682,8 @@ async def execute_exit(
 
         # Compute duration in candles from entry_time
         from backend.utils.constants import INTERVAL_HOURS
-        elapsed = (datetime.now(timezone.utc) - position.entry_time).total_seconds()
+        et = position.entry_time if position.entry_time.tzinfo else position.entry_time.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - et).total_seconds()
         interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
         duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
 

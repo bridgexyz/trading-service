@@ -140,7 +140,8 @@ async def _close_position(position: OpenPosition):
 
         # Compute duration in candles
         from backend.utils.constants import INTERVAL_HOURS
-        elapsed = (datetime.now(timezone.utc) - position.entry_time).total_seconds()
+        et = position.entry_time if position.entry_time.tzinfo else position.entry_time.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - et).total_seconds()
         interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
         duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
 
