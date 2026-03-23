@@ -622,26 +622,40 @@ async def execute_exit(
                             close_a=close_a, close_b=close_b)
                 return
 
-        # Verify positions are actually closed on the exchange
+        # Verify positions are actually closed on the exchange (with retries)
         # (skip for TWAP — slices close over minutes, not immediately)
         if order_mode in ("market", "sliced"):
-            settle_delay = 2 if order_mode == "sliced" else 1
-            await asyncio.sleep(settle_delay)
+            settle_delays = [3, 6, 10] if order_mode == "market" else [3, 6, 15]
+            positions_closed = False
+            has_leg_a = False
+            has_leg_b = False
 
-            exchange_positions = await lighter_client.get_positions()
-            exchange_markets = {p["market_index"] for p in exchange_positions}
+            for attempt, delay in enumerate(settle_delays, 1):
+                await asyncio.sleep(delay)
+                exchange_positions = await lighter_client.get_positions()
+                exchange_markets = {p["market_index"] for p in exchange_positions}
 
-            has_leg_a = pair.lighter_market_a in exchange_markets
-            has_leg_b = pair.lighter_market_b in exchange_markets
+                has_leg_a = pair.lighter_market_a in exchange_markets
+                has_leg_b = pair.lighter_market_b in exchange_markets
 
-            if has_leg_a or has_leg_b:
+                if not has_leg_a and not has_leg_b:
+                    positions_closed = True
+                    break
+
+                if attempt < len(settle_delays):
+                    logger.info(
+                        f"[{pair.name}] Exit verification attempt {attempt}/{len(settle_delays)}: "
+                        f"positions still open, retrying..."
+                    )
+
+            if not positions_closed:
                 still_open = []
                 if has_leg_a:
                     still_open.append(f"leg A (market {pair.lighter_market_a})")
                 if has_leg_b:
                     still_open.append(f"leg B (market {pair.lighter_market_b})")
                 _log_cycle(pair.id, "error", signals=signals, action="exit_not_confirmed",
-                           message=f"Exit orders accepted but positions still open: {', '.join(still_open)}",
+                           message=f"Exit orders accepted but positions still open after {len(settle_delays)} checks: {', '.join(still_open)}",
                            close_a=close_a, close_b=close_b)
                 return
 
