@@ -482,6 +482,9 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
     # not pair.current_equity which could be inflated by deposits.
     entry_equity = position.entry_notional / pair.leverage if pair.leverage > 0 else position.entry_notional
 
+    hours_held = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
+    exit_z = pair.exit_z_late if hours_held >= 8 else pair.exit_z_early
+
     exit_sig = signal_engine.evaluate_exit(
         signals=signals,
         position_direction=position.direction,
@@ -491,7 +494,7 @@ async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, price
         entry_hedge_ratio=position.entry_hedge_ratio,
         entry_notional=position.entry_notional,
         current_equity=entry_equity,
-        exit_z=pair.exit_z,
+        exit_z=exit_z,
         stop_z=pair.stop_z,
         stop_loss_pct=pair.stop_loss_pct,
         current_price_a=current_price_a,

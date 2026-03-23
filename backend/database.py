@@ -119,6 +119,18 @@ def _run_migrations():
                 conn.execute(text("UPDATE guardian_settings SET interval_minutes = GREATEST(1, interval_seconds / 60)"))
                 conn.commit()
 
+    # Migrate exit_z -> exit_z_early + add exit_z_late
+    if "exit_z" in columns and "exit_z_early" not in columns:
+        logger.info("Migrating: renaming exit_z -> exit_z_early")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair RENAME COLUMN exit_z TO exit_z_early"))
+            conn.commit()
+    if "exit_z_late" not in columns:
+        logger.info("Migrating: adding exit_z_late column")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE trading_pair ADD COLUMN exit_z_late REAL NOT NULL DEFAULT 0.2"))
+            conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

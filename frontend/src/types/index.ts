@@ -6,7 +6,8 @@ export interface TradingPair {
   lighter_market_a: number;
   lighter_market_b: number;
   entry_z: number;
-  exit_z: number;
+  exit_z_early: number;
+  exit_z_late: number;
   stop_z: number;
   window_interval: string;
   window_candles: number;

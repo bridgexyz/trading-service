@@ -16,7 +16,8 @@ class TradingPair(SQLModel, table=True):
 
     # Signal parameters
     entry_z: float = 2.0
-    exit_z: float = 0.5
+    exit_z_early: float = 0.5
+    exit_z_late: float = 0.2
     stop_z: float = 4.0
 
     # Window configuration

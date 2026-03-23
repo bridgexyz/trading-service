@@ -19,7 +19,8 @@ const defaultPair = {
   lighter_market_a: 0,
   lighter_market_b: 0,
   entry_z: 1.5,
-  exit_z: 0.5,
+  exit_z_early: 0.5,
+  exit_z_late: 0.2,
   stop_z: 4.0,
   window_interval: "4h",
   window_candles: 40,
@@ -211,7 +212,7 @@ function PairForm({
     setForm((f) => ({ ...f, [key]: value }));
 
   const handleSubmit = () => {
-    const numericKeys = ["entry_z","exit_z","stop_z","window_candles","train_candles",
+    const numericKeys = ["entry_z","exit_z_early","exit_z_late","stop_z","window_candles","train_candles",
       "max_half_life","rsi_upper","rsi_lower","rsi_period","stop_loss_pct",
       "position_size_pct","leverage","schedule_interval"] as const;
     const invalid = numericKeys.filter(k => String(form[k]) === "" || isNaN(Number(form[k])));
@@ -261,7 +262,8 @@ function PairForm({
       <SectionLabel>Signal Thresholds</SectionLabel>
       <div className="flex flex-wrap gap-3">
         <Field label="Entry Z" value={form.entry_z} onChange={(v) => set("entry_z", v)} />
-        <Field label="Exit Z" value={form.exit_z} onChange={(v) => set("exit_z", v)} />
+        <Field label="Exit Z <8h" value={form.exit_z_early} onChange={(v) => set("exit_z_early", v)} />
+        <Field label="Exit Z >8h" value={form.exit_z_late} onChange={(v) => set("exit_z_late", v)} />
         <Field label="Stop Z" value={form.stop_z} onChange={(v) => set("stop_z", v)} />
       </div>
 
@@ -438,7 +440,8 @@ export default function PairsPage() {
     lighter_market_a: pair.lighter_market_a,
     lighter_market_b: pair.lighter_market_b,
     entry_z: pair.entry_z,
-    exit_z: pair.exit_z,
+    exit_z_early: pair.exit_z_early,
+    exit_z_late: pair.exit_z_late,
     stop_z: pair.stop_z,
     window_interval: pair.window_interval,
     window_candles: pair.window_candles,

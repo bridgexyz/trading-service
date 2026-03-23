@@ -14,7 +14,8 @@ class TradingPairCreate(BaseModel):
     lighter_market_a: int = Field(default=0, ge=0)
     lighter_market_b: int = Field(default=0, ge=0)
     entry_z: float = Field(default=1.5, gt=0)
-    exit_z: float = Field(default=0.5, ge=0)
+    exit_z_early: float = Field(default=0.5, ge=0)
+    exit_z_late: float = Field(default=0.2, ge=0)
     stop_z: float = Field(default=4.0, gt=0)
     window_interval: str = "4h"
     window_candles: int = Field(default=40, ge=2)
@@ -82,7 +83,8 @@ class TradingPairUpdate(BaseModel):
     lighter_market_a: int | None = Field(default=None, ge=0)
     lighter_market_b: int | None = Field(default=None, ge=0)
     entry_z: float | None = Field(default=None, gt=0)
-    exit_z: float | None = Field(default=None, ge=0)
+    exit_z_early: float | None = Field(default=None, ge=0)
+    exit_z_late: float | None = Field(default=None, ge=0)
     stop_z: float | None = Field(default=None, gt=0)
     window_interval: str | None = None
     window_candles: int | None = Field(default=None, ge=2)
@@ -165,7 +167,8 @@ class TradingPairRead(BaseModel):
     lighter_market_a: int
     lighter_market_b: int
     entry_z: float
-    exit_z: float
+    exit_z_early: float
+    exit_z_late: float
     stop_z: float
     window_interval: str
     window_candles: int
