@@ -26,22 +26,14 @@ from backend.services.encryption import decrypt
 logger = logging.getLogger(__name__)
 
 
-async def sync_positions_on_startup():
-    """Compare DB positions against Lighter exchange and reconcile.
+def _resolve_credential_id(pair: TradingPair, default_cred_id: int | None) -> int | None:
+    """Return the credential id a pair should use."""
+    return pair.credential_id if pair.credential_id is not None else default_cred_id
 
-    Called once during scheduler startup before jobs begin running.
-    """
+
+async def _fetch_positions_for_credential(cred: Credential) -> list[dict]:
+    """Fetch exchange positions for a single credential."""
     from backend.services.lighter_client import LighterClient
-
-    # Get active credential
-    with Session(engine) as session:
-        cred = session.exec(
-            select(Credential).where(Credential.is_active == True)
-        ).first()
-
-    if not cred:
-        logger.info("Position sync: no active credential, skipping")
-        return
 
     pk = decrypt(cred.private_key_encrypted)
     client = LighterClient(
@@ -50,61 +42,84 @@ async def sync_positions_on_startup():
         api_key_index=cred.api_key_index,
         account_index=cred.account_index,
     )
-
     try:
-        exchange_positions = await client.get_positions()
+        return await client.get_positions()
     except Exception as e:
-        logger.error(f"Position sync: failed to fetch exchange positions: {e}")
-        return
+        logger.error(f"Position sync: failed to fetch positions for credential {cred.id} ({cred.name}): {e}")
+        return []
     finally:
         await client.close()
 
-    # Build lookup of exchange positions by market_index
-    exchange_by_market: dict[int, dict] = {}
-    for pos in exchange_positions:
-        exchange_by_market[pos["market_index"]] = pos
+
+async def sync_positions_on_startup():
+    """Compare DB positions against Lighter exchange and reconcile.
+
+    Called once during scheduler startup before jobs begin running.
+    Fetches exchange positions per credential so pairs with different
+    credentials are checked against the correct account.
+    """
+    with Session(engine) as session:
+        active_creds = session.exec(
+            select(Credential).where(Credential.is_active == True)
+        ).all()
+
+    if not active_creds:
+        logger.info("Position sync: no active credential, skipping")
+        return
+
+    # Fetch exchange positions for every active credential
+    # Key: credential_id → {market_index: position_dict}
+    positions_by_cred: dict[int, dict[int, dict]] = {}
+    for cred in active_creds:
+        exchange_positions = await _fetch_positions_for_credential(cred)
+        by_market: dict[int, dict] = {}
+        for pos in exchange_positions:
+            by_market[pos["market_index"]] = pos
+        positions_by_cred[cred.id] = by_market
+
+    default_cred_id = active_creds[0].id
 
     with Session(engine) as session:
         db_positions = session.exec(select(OpenPosition)).all()
 
-        if not db_positions and not exchange_positions:
+        total_exchange = sum(len(m) for m in positions_by_cred.values())
+        if not db_positions and total_exchange == 0:
             logger.info("Position sync: no positions in DB or exchange, all clear")
             return
 
         logger.info(
             f"Position sync: {len(db_positions)} DB positions, "
-            f"{len(exchange_positions)} exchange positions"
+            f"{total_exchange} exchange positions across {len(active_creds)} credentials"
         )
 
-        # Track which exchange markets are accounted for
-        matched_markets: set[int] = set()
+        # Track which (cred_id, market_index) are accounted for
+        matched_markets: set[tuple[int, int]] = set()
 
         for db_pos in db_positions:
             pair = session.get(TradingPair, db_pos.pair_id)
             if not pair:
-                # Pair was deleted but position record remains
                 logger.warning(
                     f"Position sync: orphaned DB position {db_pos.id} for deleted pair {db_pos.pair_id}, removing"
                 )
                 session.delete(db_pos)
                 continue
 
-            # Check if exchange has positions for both legs of this pair
+            cred_id = _resolve_credential_id(pair, default_cred_id)
+            exchange_by_market = positions_by_cred.get(cred_id, {})
+
             has_leg_a = pair.lighter_market_a in exchange_by_market
             has_leg_b = pair.lighter_market_b in exchange_by_market
 
             if has_leg_a:
-                matched_markets.add(pair.lighter_market_a)
+                matched_markets.add((cred_id, pair.lighter_market_a))
             if has_leg_b:
-                matched_markets.add(pair.lighter_market_b)
+                matched_markets.add((cred_id, pair.lighter_market_b))
 
             if has_leg_a and has_leg_b:
-                # Both legs present on exchange — position is valid
                 logger.info(
-                    f"Position sync: pair {pair.name} position confirmed on exchange"
+                    f"Position sync: pair {pair.name} position confirmed on exchange (cred {cred_id})"
                 )
             elif has_leg_a or has_leg_b:
-                # Only one leg present — partial fill / orphan
                 missing_leg = "B" if has_leg_a else "A"
                 present_leg = "A" if has_leg_a else "B"
                 logger.warning(
@@ -117,10 +132,9 @@ async def sync_positions_on_startup():
                     f"Leg {present_leg} still open. Manual intervention may be needed.",
                 )
             else:
-                # Neither leg on exchange — stale DB record from unfilled orders.
                 logger.warning(
-                    f"Position sync: pair {pair.name} has DB position but no exchange positions. "
-                    f"Removing stale DB record."
+                    f"Position sync: pair {pair.name} has DB position but no exchange positions "
+                    f"on credential {cred_id}. Removing stale DB record."
                 )
                 _log_sync_event(
                     session, db_pos.pair_id,
@@ -130,21 +144,22 @@ async def sync_positions_on_startup():
                 session.delete(db_pos)
 
         # Auto-recover exchange positions not tracked in DB
-        tracked_markets: set[int] = set()
+        tracked_markets: set[tuple[int, int]] = set()
         for db_pos in db_positions:
             p = session.get(TradingPair, db_pos.pair_id)
             if p:
-                tracked_markets.add(p.lighter_market_a)
-                tracked_markets.add(p.lighter_market_b)
+                cid = _resolve_credential_id(p, default_cred_id)
+                tracked_markets.add((cid, p.lighter_market_a))
+                tracked_markets.add((cid, p.lighter_market_b))
 
-        # Try to match untracked positions to enabled pair configs
         all_pairs = session.exec(
             select(TradingPair).where(TradingPair.is_enabled == True)
         ).all()
         for pair in all_pairs:
-            # Skip pairs that already have a DB position
             if any(dp.pair_id == pair.id for dp in db_positions):
                 continue
+            cred_id = _resolve_credential_id(pair, default_cred_id)
+            exchange_by_market = positions_by_cred.get(cred_id, {})
             has_a = pair.lighter_market_a in exchange_by_market
             has_b = pair.lighter_market_b in exchange_by_market
             if has_a and has_b:
@@ -166,11 +181,11 @@ async def sync_positions_on_startup():
                     entry_notional=notional,
                 )
                 session.add(pos)
-                tracked_markets.add(pair.lighter_market_a)
-                tracked_markets.add(pair.lighter_market_b)
+                tracked_markets.add((cred_id, pair.lighter_market_a))
+                tracked_markets.add((cred_id, pair.lighter_market_b))
                 logger.warning(
                     f"Position sync: auto-created DB position for {pair.name} "
-                    f"(direction={direction}, notional=${notional:.0f})"
+                    f"(direction={direction}, notional=${notional:.0f}, cred {cred_id})"
                 )
                 _log_sync_event(
                     session, pair.id,
@@ -187,13 +202,15 @@ async def sync_positions_on_startup():
                 )
 
         # Remaining unmatched exchange positions — warn only
-        for market_idx, ex_pos in exchange_by_market.items():
-            if market_idx not in tracked_markets:
-                logger.warning(
-                    f"Position sync: exchange has position in market {market_idx} "
-                    f"({ex_pos['side']}, size={ex_pos['size']:.4f}) not tracked by any DB pair. "
-                    f"This may be a manually opened position or from a deleted pair."
-                )
+        for cred_id, by_market in positions_by_cred.items():
+            for market_idx, ex_pos in by_market.items():
+                if (cred_id, market_idx) not in tracked_markets:
+                    logger.warning(
+                        f"Position sync: exchange has position in market {market_idx} "
+                        f"({ex_pos['side']}, size={ex_pos['size']:.4f}) on credential {cred_id} "
+                        f"not tracked by any DB pair. "
+                        f"This may be a manually opened position or from a deleted pair."
+                    )
 
         session.commit()
 
