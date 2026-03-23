@@ -34,8 +34,8 @@ def _notify(message: str):
         bot = get_bot()
         if bot and bot._loop:
             asyncio.run_coroutine_threadsafe(bot.send_notification(message), bot._loop)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Telegram notification failed: {e}")
 
 
 async def run_pair_cycle(pair_id: int):
@@ -679,8 +679,11 @@ async def execute_exit(
 
         pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
 
-        # Determine duration (approximate in candles — we don't track entry index in live)
-        duration = 0
+        # Compute duration in candles from entry_time
+        from backend.utils.constants import INTERVAL_HOURS
+        elapsed = (datetime.now(timezone.utc) - position.entry_time).total_seconds()
+        interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
+        duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
 
         direction_str = "Long A / Short B" if position.direction == 1 else "Short A / Long B"
 
@@ -711,11 +714,19 @@ async def execute_exit(
             db_pair.updated_at = datetime.now(timezone.utc)
             session.add(db_pair)
 
-            # Save equity snapshot
+            # Save equity snapshot with drawdown from peak
+            from sqlalchemy import func
+            peak_equity = session.exec(
+                select(func.max(EquitySnapshot.equity))
+                .where(EquitySnapshot.pair_id == pair.id)
+            ).one_or_none() or db_pair.current_equity
+            new_equity = round(db_pair.current_equity, 2)
+            dd_pct = round((new_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
+
             snapshot = EquitySnapshot(
                 pair_id=pair.id,
-                equity=round(db_pair.current_equity, 2),
-                drawdown_pct=0.0,  # TODO: compute from peak
+                equity=new_equity,
+                drawdown_pct=min(dd_pct, 0.0),
             )
             session.add(snapshot)
 

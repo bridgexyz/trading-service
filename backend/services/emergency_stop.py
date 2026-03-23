@@ -68,9 +68,12 @@ async def _close_position(position: OpenPosition):
         if not pair:
             raise ValueError(f"Pair {position.pair_id} not found")
 
-        cred = session.exec(
-            select(Credential).where(Credential.is_active == True)
-        ).first()
+        if pair.credential_id:
+            cred = session.get(Credential, pair.credential_id)
+        else:
+            cred = session.exec(
+                select(Credential).where(Credential.is_active == True)
+            ).first()
         if not cred:
             raise ValueError("No active credential")
 
@@ -86,12 +89,14 @@ async def _close_position(position: OpenPosition):
         from backend.services.market_data import fetch_pair_data
 
         data = await fetch_pair_data(
-            market_a=pair.lighter_market_a,
-            market_b=pair.lighter_market_b,
+            asset_a=pair.asset_a,
+            asset_b=pair.asset_b,
             window_interval=pair.window_interval,
             window_candles=5,
             train_interval=pair.train_interval,
             train_candles=5,
+            market_id_a=pair.lighter_market_a,
+            market_id_b=pair.lighter_market_b,
         )
         current_price_a = float(data["prices_a"].iloc[-1])
         current_price_b = float(data["prices_b"].iloc[-1])
@@ -133,6 +138,12 @@ async def _close_position(position: OpenPosition):
 
         direction_str = "Long A / Short B" if position.direction == 1 else "Short A / Long B"
 
+        # Compute duration in candles
+        from backend.utils.constants import INTERVAL_HOURS
+        elapsed = (datetime.now(timezone.utc) - position.entry_time).total_seconds()
+        interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
+        duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
+
         with Session(engine) as session:
             trade = Trade(
                 pair_id=pair.id,
@@ -149,7 +160,7 @@ async def _close_position(position: OpenPosition):
                 pnl=round(pnl, 2),
                 pnl_pct=round(pnl_pct, 2),
                 exit_reason="emergency_stop",
-                duration_candles=0,
+                duration_candles=duration,
             )
             session.add(trade)
 
@@ -158,10 +169,18 @@ async def _close_position(position: OpenPosition):
             db_pair.updated_at = datetime.now(timezone.utc)
             session.add(db_pair)
 
+            from sqlalchemy import func
+            peak_equity = session.exec(
+                select(func.max(EquitySnapshot.equity))
+                .where(EquitySnapshot.pair_id == pair.id)
+            ).one_or_none() or db_pair.current_equity
+            new_equity = round(db_pair.current_equity, 2)
+            dd_pct = round((new_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
+
             snapshot = EquitySnapshot(
                 pair_id=pair.id,
-                equity=round(db_pair.current_equity, 2),
-                drawdown_pct=0.0,
+                equity=new_equity,
+                drawdown_pct=min(dd_pct, 0.0),
             )
             session.add(snapshot)
 

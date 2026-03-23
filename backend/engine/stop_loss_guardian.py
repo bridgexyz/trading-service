@@ -63,7 +63,8 @@ async def run_stop_loss_check():
         else:
             mid_prices[mid] = result.get("mid_price", 0.0)
 
-    # Check each position for stop-loss breach
+    # Check each position for stop-loss breach, collect triggered exits
+    exit_tasks = []
     for pair, pos in checks:
         price_a = mid_prices.get(pair.lighter_market_a)
         price_b = mid_prices.get(pair.lighter_market_b)
@@ -95,17 +96,33 @@ async def run_stop_loss_check():
             _log_cycle(pair.id, "success", action="guardian_stop_loss",
                        message=f"Guardian triggered stop-loss: {unreal_pct:.2f}% (threshold: -{stop_loss_pct:.1f}%)",
                        close_a=price_a, close_b=price_b)
-            try:
-                await execute_exit(
-                    pair, pos, price_a, price_b,
-                    exit_reason="stop_loss",
-                )
-            except Exception as e:
-                logger.error(f"[guardian] Failed to execute exit for {pair.name}: {e}", exc_info=True)
-                _log_cycle(pair.id, "error", action="guardian_exit_failed",
-                           message=f"Guardian exit failed: {e}",
-                           close_a=price_a, close_b=price_b)
+            exit_tasks.append((pair, pos, price_a, price_b))
         else:
             logger.debug(
                 f"[guardian] {pair.name}: OK unrealized={unreal_pct:.2f}% (threshold: -{stop_loss_pct:.1f}%)"
             )
+
+    # Execute all triggered exits in parallel
+    if exit_tasks:
+        results = await asyncio.gather(
+            *[_guardian_exit(pair, pos, pa, pb, execute_exit, _log_cycle)
+              for pair, pos, pa, pb in exit_tasks],
+            return_exceptions=True,
+        )
+        for (pair, _, _, _), result in zip(exit_tasks, results):
+            if isinstance(result, Exception):
+                logger.error(f"[guardian] Exit gather error for {pair.name}: {result}", exc_info=True)
+
+
+async def _guardian_exit(pair, pos, price_a, price_b, execute_exit, _log_cycle):
+    """Execute a single guardian stop-loss exit with error handling."""
+    try:
+        await execute_exit(
+            pair, pos, price_a, price_b,
+            exit_reason="stop_loss",
+        )
+    except Exception as e:
+        logger.error(f"[guardian] Failed to execute exit for {pair.name}: {e}", exc_info=True)
+        _log_cycle(pair.id, "error", action="guardian_exit_failed",
+                   message=f"Guardian exit failed: {e}",
+                   close_a=price_a, close_b=price_b)
