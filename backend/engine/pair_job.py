@@ -88,11 +88,14 @@ async def _run_pair_cycle_once(pair_id: int):
         # Step 1: Fetch market data
         from backend.services.market_data import fetch_pair_data
 
+        # Fetch enough candles for both z-score and RSI (RSI needs rsi_period + 2)
+        fetch_candles = max(pair.window_candles, pair.rsi_period + 2)
+
         data = await fetch_pair_data(
             asset_a=pair.asset_a,
             asset_b=pair.asset_b,
             window_interval=pair.window_interval,
-            window_candles=pair.window_candles,
+            window_candles=fetch_candles,
             train_interval=pair.train_interval,
             train_candles=pair.train_candles,
             market_id_a=pair.lighter_market_a or None,
@@ -120,7 +123,7 @@ async def _run_pair_cycle_once(pair_id: int):
         close_a = float(prices_a.iloc[-1])
         close_b = float(prices_b.iloc[-1])
 
-        if len(prices_a) < pair.window_candles or len(prices_b) < pair.window_candles:
+        if len(prices_a) < fetch_candles or len(prices_b) < fetch_candles:
             _log_cycle(pair_id, "error", message="Insufficient price data",
                        close_a=close_a, close_b=close_b, market_data=mkt)
             return
