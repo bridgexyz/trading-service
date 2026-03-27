@@ -87,12 +87,13 @@ async def enriched_positions(session: Session = Depends(get_session)):
         current_price_a = price_map.get(pair.lighter_market_a, 0.0)
         current_price_b = price_map.get(pair.lighter_market_b, 0.0)
 
-        # Approximate unrealized P&L based on entry notional and price changes
+        # Unrealized P&L using same sizing formula as entry (pair_job.py)
         pnl = 0.0
         if pos.entry_price_a > 0 and pos.entry_price_b > 0:
-            # Size in asset A terms
-            size_a = pos.entry_notional / pos.entry_price_a / 2
-            size_b = size_a * pos.entry_hedge_ratio
+            dollar_per_unit = pos.entry_price_a + abs(pos.entry_hedge_ratio) * pos.entry_price_b
+            units = pos.entry_notional / dollar_per_unit if dollar_per_unit > 0 else 0
+            size_a = abs(units)
+            size_b = abs(units * pos.entry_hedge_ratio)
             pnl_a = (current_price_a - pos.entry_price_a) * pos.direction * size_a
             pnl_b = (pos.entry_price_b - current_price_b) * pos.direction * size_b
             pnl = pnl_a + pnl_b
@@ -127,29 +128,37 @@ async def exchange_positions(session: Session = Depends(get_session)):
     """
     from backend.services.lighter_client import LighterClient
 
-    # Get active credential
-    cred = session.exec(
+    # Get ALL active credentials
+    creds = session.exec(
         select(Credential).where(Credential.is_active == True)
-    ).first()
-    if not cred:
+    ).all()
+    if not creds:
         return []
 
-    pk = decrypt(cred.private_key_encrypted)
-    client = LighterClient(
-        host=cred.lighter_host,
-        private_key=pk,
-        api_key_index=cred.api_key_index,
-        account_index=cred.account_index,
+    # Fetch positions from all credentials in parallel
+    async def _fetch_for_cred(cred):
+        pk = decrypt(cred.private_key_encrypted)
+        client = LighterClient(
+            host=cred.lighter_host,
+            private_key=pk,
+            api_key_index=cred.api_key_index,
+            account_index=cred.account_index,
+        )
+        try:
+            return cred, await client.get_positions()
+        finally:
+            await client.close()
+
+    cred_results, markets = await asyncio.gather(
+        asyncio.gather(*[_fetch_for_cred(c) for c in creds]),
+        fetch_markets(),
     )
 
-    try:
-        # Fetch exchange positions and market list in parallel
-        exchange_positions_raw, markets = await asyncio.gather(
-            client.get_positions(),
-            fetch_markets(),
-        )
-    finally:
-        await client.close()
+    exchange_positions_raw = []
+    for cred, positions in cred_results:
+        for pos in positions:
+            pos["_credential_name"] = cred.name or f"Credential {cred.id}"
+            exchange_positions_raw.append(pos)
 
     if not exchange_positions_raw:
         return []
@@ -198,6 +207,7 @@ async def exchange_positions(session: Session = Depends(get_session)):
             "notional": round(notional, 2),
             "unrealized_pnl": round(pnl, 4),
             "unrealized_pnl_pct": round(pnl_pct, 2),
+            "credential": pos.get("_credential_name", ""),
         })
 
     return result
