@@ -9,13 +9,14 @@ from backend.database import engine
 from backend.models.guardian_settings import GuardianSettings
 from backend.models.position import OpenPosition
 from backend.models.trading_pair import TradingPair
+from backend.models.credential import Credential
+from backend.services.encryption import decrypt
 
 logger = logging.getLogger(__name__)
 
 
 async def run_stop_loss_check():
     """Check all open positions for stop-loss breaches and close if triggered."""
-    # Avoid circular import — pair_job imports from models/services that import engine
     from backend.engine.pair_job import execute_exit, _log_cycle
 
     with Session(engine) as session:
@@ -27,29 +28,49 @@ async def run_stop_loss_check():
         if not positions:
             return
 
-        # Load pairs for each position
+        # Load pairs and credentials
         pair_ids = [p.pair_id for p in positions]
         pairs = session.exec(
             select(TradingPair).where(TradingPair.id.in_(pair_ids))
         ).all()
         pair_map = {p.id: p for p in pairs}
 
-    # Filter out excluded pairs
+        active_creds = session.exec(
+            select(Credential).where(Credential.is_active == True)
+        ).all()
+        cred_map = {c.id: c for c in active_creds}
+        default_cred_id = active_creds[0].id if active_creds else None
+
+    # Filter out excluded pairs, resolve credentials
     checks = []
     for pos in positions:
         pair = pair_map.get(pos.pair_id)
         if not pair or not pair.is_enabled or pair.guardian_excluded:
             continue
-        checks.append((pair, pos))
+        cred_id = pair.credential_id if pair.credential_id is not None else default_cred_id
+        checks.append((pair, pos, cred_id))
 
     if not checks:
         return
 
-    # Collect unique market IDs and fetch orderbook mid-prices in parallel
+    # Fetch exchange positions from each needed credential
+    needed_cred_ids = {cid for _, _, cid in checks if cid is not None}
+    exchange_positions_by_cred = {}
+    for cid in needed_cred_ids:
+        cred = cred_map.get(cid)
+        if not cred:
+            continue
+        try:
+            exchange_positions_by_cred[cid] = await _fetch_exchange_positions(cred)
+        except Exception as e:
+            logger.error(f"[guardian] Failed to fetch exchange positions for credential {cid}: {e}")
+            exchange_positions_by_cred[cid] = {}
+
+    # Fetch orderbook mid-prices for current prices
     from backend.services.market_data import fetch_orderbook
 
     market_ids = set()
-    for pair, _ in checks:
+    for pair, _, _ in checks:
         market_ids.add(pair.lighter_market_a)
         market_ids.add(pair.lighter_market_b)
 
@@ -63,9 +84,9 @@ async def run_stop_loss_check():
         else:
             mid_prices[mid] = result.get("mid_price", 0.0)
 
-    # Check each position for stop-loss breach, collect triggered exits
+    # Check each position for stop-loss breach using real exchange data
     exit_tasks = []
-    for pair, pos in checks:
+    for pair, pos, cred_id in checks:
         price_a = mid_prices.get(pair.lighter_market_a)
         price_b = mid_prices.get(pair.lighter_market_b)
 
@@ -76,13 +97,32 @@ async def run_stop_loss_check():
                        close_a=price_a, close_b=price_b)
             continue
 
-        # Compute unrealized PnL % using same formula as signal_engine.evaluate_exit
+        # Compute unrealized PnL from real exchange positions
+        ex_positions = exchange_positions_by_cred.get(cred_id, {})
+        ex_a = ex_positions.get(pair.lighter_market_a)
+        ex_b = ex_positions.get(pair.lighter_market_b)
+
+        if not ex_a and not ex_b:
+            logger.debug(f"[guardian] {pair.name}: no exchange positions found on credential {cred_id}")
+            continue
+
+        # Sum PnL from each leg using real entry prices and sizes
+        unreal_pnl = 0.0
+        total_notional = 0.0
+        for ex_pos, current_price in [(ex_a, price_a), (ex_b, price_b)]:
+            if not ex_pos:
+                continue
+            entry_price = ex_pos["entry_price"]
+            size = ex_pos["size"]
+            side = ex_pos["side"]
+            if entry_price > 0 and current_price > 0:
+                if side == "long":
+                    unreal_pnl += (current_price - entry_price) * size
+                else:
+                    unreal_pnl += (entry_price - current_price) * size
+                total_notional += entry_price * size
+
         entry_equity = pos.entry_notional / pair.leverage if pair.leverage > 0 else pos.entry_notional
-        exit_spread = price_a - pos.entry_hedge_ratio * price_b
-        spread_change = exit_spread - pos.entry_spread
-        dollar_per_unit = pos.entry_price_a + abs(pos.entry_hedge_ratio) * pos.entry_price_b
-        spread_units = pos.entry_notional / dollar_per_unit if dollar_per_unit != 0 else 0
-        unreal_pnl = pos.direction * spread_change * spread_units
         unreal_pct = unreal_pnl / entry_equity * 100 if entry_equity != 0 else 0
 
         # Determine which stop_loss_pct to use
@@ -91,15 +131,15 @@ async def run_stop_loss_check():
         if stop_loss_pct > 0 and unreal_pct <= -stop_loss_pct:
             logger.warning(
                 f"[guardian] STOP-LOSS triggered for {pair.name}: "
-                f"unrealized={unreal_pct:.2f}% (threshold={-stop_loss_pct:.1f}%)"
+                f"unrealized=${unreal_pnl:.2f} ({unreal_pct:.2f}%) (threshold={-stop_loss_pct:.1f}%)"
             )
             _log_cycle(pair.id, "success", action="guardian_stop_loss",
-                       message=f"Guardian triggered stop-loss: {unreal_pct:.2f}% (threshold: -{stop_loss_pct:.1f}%)",
+                       message=f"Guardian triggered stop-loss: ${unreal_pnl:.2f} ({unreal_pct:.2f}%) (threshold: -{stop_loss_pct:.1f}%)",
                        close_a=price_a, close_b=price_b)
             exit_tasks.append((pair, pos, price_a, price_b))
         else:
             logger.debug(
-                f"[guardian] {pair.name}: OK unrealized={unreal_pct:.2f}% (threshold: -{stop_loss_pct:.1f}%)"
+                f"[guardian] {pair.name}: OK unrealized=${unreal_pnl:.2f} ({unreal_pct:.2f}%) (threshold: -{stop_loss_pct:.1f}%)"
             )
 
     # Execute all triggered exits in parallel
@@ -112,6 +152,24 @@ async def run_stop_loss_check():
         for (pair, _, _, _), result in zip(exit_tasks, results):
             if isinstance(result, Exception):
                 logger.error(f"[guardian] Exit gather error for {pair.name}: {result}", exc_info=True)
+
+
+async def _fetch_exchange_positions(cred: Credential) -> dict[int, dict]:
+    """Fetch exchange positions for a credential, keyed by market_index."""
+    from backend.services.lighter_client import LighterClient
+
+    pk = decrypt(cred.private_key_encrypted)
+    client = LighterClient(
+        host=cred.lighter_host,
+        private_key=pk,
+        api_key_index=cred.api_key_index,
+        account_index=cred.account_index,
+    )
+    try:
+        raw = await client.get_positions()
+        return {p["market_index"]: p for p in raw}
+    finally:
+        await client.close()
 
 
 async def _guardian_exit(pair, pos, price_a, price_b, execute_exit, _log_cycle):

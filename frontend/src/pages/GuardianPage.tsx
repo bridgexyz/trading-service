@@ -293,7 +293,7 @@ export default function GuardianPage() {
                     SL: {pair.stop_loss_pct}%
                   </span>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <div className="flex items-center gap-2">
                   <span
                     className={`text-[11px] font-mono ${
                       pair.guardian_excluded
@@ -312,7 +312,7 @@ export default function GuardianPage() {
                       })
                     }
                   />
-                </label>
+                </div>
               </div>
             ))}
           </div>
