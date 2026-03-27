@@ -3,6 +3,27 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import type { GuardianSettings, GuardianStatus, TradingPair, JobLog } from "../types";
 
+interface GuardianLeg {
+  leg: string;
+  side: string;
+  size: number;
+  entry_price: number;
+  current_price: number;
+  pnl: number;
+}
+
+interface GuardianPnl {
+  pair_name: string;
+  pair_id: number;
+  excluded: boolean;
+  stop_loss_pct: number;
+  entry_equity: number;
+  unrealized_pnl: number;
+  unrealized_pct: number;
+  triggered: boolean;
+  legs: GuardianLeg[];
+}
+
 function Toggle({
   checked,
   onChange,
@@ -49,6 +70,12 @@ export default function GuardianPage() {
   const { data: pairs } = useQuery<TradingPair[]>({
     queryKey: ["pairs"],
     queryFn: () => api.get("/pairs").then((r) => r.data),
+  });
+
+  const { data: livePnl } = useQuery<GuardianPnl[]>({
+    queryKey: ["guardian-live-pnl"],
+    queryFn: () => api.get("/guardian/live-pnl").then((r) => r.data),
+    refetchInterval: 15000,
   });
 
   const [form, setForm] = useState({
@@ -262,6 +289,88 @@ export default function GuardianPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Live PnL Monitor */}
+      <div className="bg-surface-1 border border-border-default rounded-lg p-5">
+        <h3 className="text-sm font-semibold tracking-tight mb-3">
+          Live Positions
+        </h3>
+        <p className="text-[12px] text-text-muted mb-4">
+          Real-time PnL from exchange data — exactly what the guardian uses for stop-loss decisions.
+        </p>
+
+        {!livePnl || livePnl.length === 0 ? (
+          <p className="text-[13px] text-text-muted py-4 text-center">
+            No monitored positions
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {livePnl.map((p) => {
+              const pnlColor = p.unrealized_pnl >= 0 ? "text-accent" : "text-negative";
+              return (
+                <div
+                  key={p.pair_id}
+                  className={`px-4 py-3 rounded-md border ${
+                    p.triggered
+                      ? "bg-negative/8 border-negative/30"
+                      : "bg-surface-2/30 border-border-default"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[13px] font-medium text-text-primary">
+                        {p.pair_name}
+                      </span>
+                      <span className="text-[11px] font-mono text-text-muted">
+                        SL: {p.stop_loss_pct}%
+                      </span>
+                      {p.excluded && (
+                        <span className="text-[10px] font-mono text-warning px-1.5 py-0.5 rounded bg-warning/10">
+                          EXCLUDED
+                        </span>
+                      )}
+                      {p.triggered && (
+                        <span className="text-[10px] font-mono text-negative px-1.5 py-0.5 rounded bg-negative/10">
+                          TRIGGERED
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-[15px] font-mono font-semibold ${pnlColor}`}>
+                        ${p.unrealized_pnl.toFixed(2)}
+                      </span>
+                      <span className={`text-[13px] font-mono ${pnlColor}`}>
+                        {p.unrealized_pct >= 0 ? "+" : ""}{p.unrealized_pct.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                  {/* Leg details */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {p.legs.map((leg) => (
+                      <div key={leg.leg} className="flex items-center gap-2 text-[11px] font-mono text-text-muted">
+                        <span className="text-text-secondary">Leg {leg.leg}</span>
+                        <span className={leg.side === "long" ? "text-accent" : "text-negative"}>
+                          {leg.side}
+                        </span>
+                        <span>{leg.size > 0 ? leg.size.toFixed(4) : "-"}</span>
+                        <span>@{leg.entry_price}</span>
+                        <span>→</span>
+                        <span>{leg.current_price}</span>
+                        <span className={leg.pnl >= 0 ? "text-accent" : "text-negative"}>
+                          ${leg.pnl.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[10px] font-mono text-text-muted mt-1">
+                    Entry equity: ${p.entry_equity.toFixed(2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Pair exclusion list */}
