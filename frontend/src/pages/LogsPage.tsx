@@ -11,6 +11,7 @@ const PAGE_SIZE = 50;
 export default function LogsPage() {
   const [pairFilter, setPairFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [actionFilter, setActionFilter] = useState<string>("");
   const [zMin, setZMin] = useState("");
   const [zMax, setZMax] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -22,19 +23,25 @@ export default function LogsPage() {
     queryFn: () => api.get("/pairs").then((r) => r.data),
   });
 
+  const { data: actions } = useQuery<string[]>({
+    queryKey: ["log-actions"],
+    queryFn: () => api.get("/system/logs/actions").then((r) => r.data),
+  });
+
   const params = new URLSearchParams({
     limit: String(PAGE_SIZE),
     offset: String(page * PAGE_SIZE),
   });
   if (pairFilter) params.set("pair_id", pairFilter);
   if (statusFilter) params.set("status", statusFilter);
+  if (actionFilter) params.set("action", actionFilter);
   if (zMin) params.set("z_min", zMin);
   if (zMax) params.set("z_max", zMax);
   if (dateFrom) params.set("date_from", dateFrom);
   if (dateTo) params.set("date_to", dateTo);
 
   const { data } = useQuery<{ items: JobLog[]; total: number }>({
-    queryKey: ["logs", pairFilter, statusFilter, zMin, zMax, dateFrom, dateTo, page],
+    queryKey: ["logs", pairFilter, statusFilter, actionFilter, zMin, zMax, dateFrom, dateTo, page],
     queryFn: () =>
       api.get(`/system/logs?${params}`).then((r) => r.data),
   });
@@ -51,7 +58,7 @@ export default function LogsPage() {
     "bg-surface-2 border border-border-default rounded-md px-3 py-2 text-[12px] text-text-primary hover:border-border-hover transition-colors font-mono min-h-[44px] md:min-h-0";
   const selectCls = inputCls;
 
-  const hasAdvancedFilters = zMin || zMax || dateFrom || dateTo;
+  const hasAdvancedFilters = actionFilter || zMin || zMax || dateFrom || dateTo;
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -84,6 +91,18 @@ export default function LogsPage() {
             <option value="success">Success</option>
             <option value="error">Error</option>
             <option value="skipped">Skipped</option>
+          </select>
+          <select
+            value={actionFilter}
+            onChange={(e) => { setActionFilter(e.target.value); resetPage(); }}
+            className={selectCls}
+          >
+            <option value="">All Actions</option>
+            {actions?.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
           </select>
 
           <input
@@ -118,7 +137,7 @@ export default function LogsPage() {
 
           {hasAdvancedFilters && (
             <button
-              onClick={() => { setZMin(""); setZMax(""); setDateFrom(""); setDateTo(""); resetPage(); }}
+              onClick={() => { setActionFilter(""); setZMin(""); setZMax(""); setDateFrom(""); setDateTo(""); resetPage(); }}
               className="px-3 py-2 text-[12px] font-mono text-text-secondary hover:text-text-primary transition-colors"
             >
               Clear Filters

@@ -38,10 +38,20 @@ async def trigger_pair(pair_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/logs/actions", dependencies=[Depends(get_current_user)])
+def log_actions(session: Session = Depends(get_session)):
+    """Return distinct action values from job logs."""
+    rows = session.exec(
+        select(JobLog.action).where(JobLog.action.is_not(None)).distinct().order_by(JobLog.action)
+    ).all()
+    return [a for a in rows if a]
+
+
 @router.get("/logs", dependencies=[Depends(get_current_user)])
 def job_logs(
     pair_id: int | None = None,
     status: str | None = None,
+    action: str | None = None,
     z_min: float | None = None,
     z_max: float | None = None,
     date_from: str | None = None,
@@ -55,6 +65,8 @@ def job_logs(
         base = base.where(JobLog.pair_id == pair_id)
     if status is not None:
         base = base.where(JobLog.status == status)
+    if action is not None:
+        base = base.where(JobLog.action == action)
     if z_min is not None:
         base = base.where(sa_func.abs(JobLog.z_score) >= z_min)
     if z_max is not None:
