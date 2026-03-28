@@ -29,6 +29,10 @@ const defaultPair = {
   rsi_upper: 65,
   rsi_lower: 15,
   rsi_period: 14,
+  rsi_a_lower: 10,
+  rsi_a_upper: 70,
+  rsi_b_lower: 10,
+  rsi_b_upper: 70,
   stop_loss_pct: 10,
   position_size_pct: 50,
   leverage: 5,
@@ -213,8 +217,9 @@ function PairForm({
 
   const handleSubmit = () => {
     const numericKeys = ["entry_z","exit_z_early","exit_z_late","stop_z","window_candles","train_candles",
-      "max_half_life","rsi_upper","rsi_lower","rsi_period","stop_loss_pct",
-      "position_size_pct","leverage","schedule_interval"] as const;
+      "max_half_life","rsi_upper","rsi_lower","rsi_period",
+      "rsi_a_lower","rsi_a_upper","rsi_b_lower","rsi_b_upper",
+      "stop_loss_pct","position_size_pct","leverage","schedule_interval"] as const;
     const invalid = numericKeys.filter(k => String(form[k]) === "" || isNaN(Number(form[k])));
     if (invalid.length > 0) return;
     if (form.use_exit_schedule && (String(form.exit_schedule_interval) === "" || isNaN(Number(form.exit_schedule_interval)))) return;
@@ -277,9 +282,13 @@ function PairForm({
       <SectionLabel>Regime Filters</SectionLabel>
       <div className="flex flex-wrap gap-3">
         <Field label="Max Half-Life" value={form.max_half_life} onChange={(v) => set("max_half_life", v)} />
-        <Field label="RSI Upper" value={form.rsi_upper} onChange={(v) => set("rsi_upper", v)} />
-        <Field label="RSI Lower" value={form.rsi_lower} onChange={(v) => set("rsi_lower", v)} />
         <Field label="RSI Period" value={form.rsi_period} onChange={(v) => set("rsi_period", v)} />
+        <Field label="Ratio RSI Upper" value={form.rsi_upper} onChange={(v) => set("rsi_upper", v)} />
+        <Field label="Ratio RSI Lower" value={form.rsi_lower} onChange={(v) => set("rsi_lower", v)} />
+        <Field label="RSI A Lower" value={form.rsi_a_lower} onChange={(v) => set("rsi_a_lower", v)} />
+        <Field label="RSI A Upper" value={form.rsi_a_upper} onChange={(v) => set("rsi_a_upper", v)} />
+        <Field label="RSI B Lower" value={form.rsi_b_lower} onChange={(v) => set("rsi_b_lower", v)} />
+        <Field label="RSI B Upper" value={form.rsi_b_upper} onChange={(v) => set("rsi_b_upper", v)} />
       </div>
 
       <SectionLabel>Risk & Execution</SectionLabel>
@@ -450,6 +459,10 @@ export default function PairsPage() {
     rsi_upper: pair.rsi_upper,
     rsi_lower: pair.rsi_lower,
     rsi_period: pair.rsi_period,
+    rsi_a_lower: pair.rsi_a_lower ?? 10,
+    rsi_a_upper: pair.rsi_a_upper ?? 70,
+    rsi_b_lower: pair.rsi_b_lower ?? 10,
+    rsi_b_upper: pair.rsi_b_upper ?? 70,
     stop_loss_pct: pair.stop_loss_pct,
     position_size_pct: pair.position_size_pct,
     leverage: pair.leverage,

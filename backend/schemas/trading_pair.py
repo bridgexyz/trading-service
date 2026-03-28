@@ -25,6 +25,10 @@ class TradingPairCreate(BaseModel):
     rsi_upper: float = Field(default=65.0, ge=0, le=100)
     rsi_lower: float = Field(default=15.0, ge=0, le=100)
     rsi_period: int = Field(default=14, ge=2)
+    rsi_a_lower: float = Field(default=10.0, ge=0, le=100)
+    rsi_a_upper: float = Field(default=70.0, ge=0, le=100)
+    rsi_b_lower: float = Field(default=10.0, ge=0, le=100)
+    rsi_b_upper: float = Field(default=70.0, ge=0, le=100)
     stop_loss_pct: float = Field(default=10.0, ge=0)
     position_size_pct: float = Field(default=50.0, gt=0, le=100)
     leverage: float = Field(default=5.0, gt=0)
@@ -94,6 +98,10 @@ class TradingPairUpdate(BaseModel):
     rsi_upper: float | None = Field(default=None, ge=0, le=100)
     rsi_lower: float | None = Field(default=None, ge=0, le=100)
     rsi_period: int | None = Field(default=None, ge=2)
+    rsi_a_lower: float | None = Field(default=None, ge=0, le=100)
+    rsi_a_upper: float | None = Field(default=None, ge=0, le=100)
+    rsi_b_lower: float | None = Field(default=None, ge=0, le=100)
+    rsi_b_upper: float | None = Field(default=None, ge=0, le=100)
     stop_loss_pct: float | None = Field(default=None, ge=0)
     position_size_pct: float | None = Field(default=None, gt=0, le=100)
     leverage: float | None = Field(default=None, gt=0)
@@ -178,6 +186,10 @@ class TradingPairRead(BaseModel):
     rsi_upper: float
     rsi_lower: float
     rsi_period: int
+    rsi_a_lower: float
+    rsi_a_upper: float
+    rsi_b_lower: float
+    rsi_b_upper: float
     stop_loss_pct: float
     position_size_pct: float
     leverage: float

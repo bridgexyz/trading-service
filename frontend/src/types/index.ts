@@ -17,6 +17,10 @@ export interface TradingPair {
   rsi_upper: number;
   rsi_lower: number;
   rsi_period: number;
+  rsi_a_lower: number;
+  rsi_a_upper: number;
+  rsi_b_lower: number;
+  rsi_b_upper: number;
   stop_loss_pct: number;
   position_size_pct: number;
   leverage: number;

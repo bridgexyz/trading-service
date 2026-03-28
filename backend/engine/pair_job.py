@@ -146,7 +146,7 @@ async def _run_pair_cycle_once(pair_id: int):
 
         logger.info(
             f"[{pair_name}] z={signals.z_score:.3f} hr={signals.hedge_ratio:.4f} "
-            f"hl={signals.half_life:.1f} rsi={signals.rsi:.1f}"
+            f"hl={signals.half_life:.1f} rsi={signals.rsi:.1f} rsi_a={signals.rsi_a:.1f} rsi_b={signals.rsi_b:.1f}"
         )
 
         # Step 3: Check for open position
@@ -322,6 +322,10 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         current_equity=position_size,
         equity_floor=equity_floor,
         leverage=pair.leverage,
+        rsi_a_lower=pair.rsi_a_lower,
+        rsi_a_upper=pair.rsi_a_upper,
+        rsi_b_lower=pair.rsi_b_lower,
+        rsi_b_upper=pair.rsi_b_upper,
     )
 
     if not entry.should_enter:

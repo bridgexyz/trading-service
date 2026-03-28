@@ -131,6 +131,17 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE trading_pair ADD COLUMN exit_z_late REAL NOT NULL DEFAULT 0.2"))
             conn.commit()
 
+    # Add per-asset RSI filter columns
+    for col_name, default in [
+        ("rsi_a_lower", 10.0), ("rsi_a_upper", 70.0),
+        ("rsi_b_lower", 10.0), ("rsi_b_upper", 70.0),
+    ]:
+        if col_name not in columns:
+            logger.info(f"Migrating: adding {col_name} column to trading_pair")
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE trading_pair ADD COLUMN {col_name} REAL NOT NULL DEFAULT {default}"))
+                conn.commit()
+
     # Ensure unique constraint on open_position.pair_id
     if "open_position" in inspector.get_table_names():
         existing_indexes = inspector.get_indexes("open_position")

@@ -89,6 +89,8 @@ class SignalResult:
     hedge_ratio: float
     half_life: float
     rsi: float
+    rsi_a: float
+    rsi_b: float
     current_spread: float
     spread_mean: float
     spread_std: float
@@ -156,11 +158,17 @@ def compute_signals(
     ratio = prices_a / prices_b
     rsi = compute_rsi(ratio, period=rsi_period)
 
+    # Per-asset RSI
+    rsi_a = compute_rsi(prices_a, period=rsi_period)
+    rsi_b = compute_rsi(prices_b, period=rsi_period)
+
     return SignalResult(
         z_score=z,
         hedge_ratio=hr,
         half_life=hl,
         rsi=rsi,
+        rsi_a=rsi_a,
+        rsi_b=rsi_b,
         current_spread=spread_now,
         spread_mean=spread_mean,
         spread_std=spread_std,
@@ -176,6 +184,10 @@ def evaluate_entry(
     current_equity: float,
     equity_floor: float,
     leverage: float,
+    rsi_a_lower: float = 0.0,
+    rsi_a_upper: float = 100.0,
+    rsi_b_lower: float = 0.0,
+    rsi_b_upper: float = 100.0,
 ) -> EntrySignal:
     """Evaluate whether to enter a new position.
 
@@ -193,11 +205,19 @@ def evaluate_entry(
     if use_hl and not (0 < signals.half_life <= max_half_life):
         return EntrySignal(should_enter=False, skip_reason="half_life")
 
-    # RSI filter
+    # RSI filter (ratio)
     use_rsi = rsi_lower > 0 or rsi_upper < 100
     if use_rsi and not np.isnan(signals.rsi):
         if signals.rsi < rsi_lower or signals.rsi > rsi_upper:
             return EntrySignal(should_enter=False, skip_reason="rsi")
+
+    # Per-asset RSI filter
+    use_rsi_asset = rsi_a_lower > 0 or rsi_a_upper < 100 or rsi_b_lower > 0 or rsi_b_upper < 100
+    if use_rsi_asset:
+        if not np.isnan(signals.rsi_a) and (signals.rsi_a < rsi_a_lower or signals.rsi_a > rsi_a_upper):
+            return EntrySignal(should_enter=False, skip_reason="rsi_asset")
+        if not np.isnan(signals.rsi_b) and (signals.rsi_b < rsi_b_lower or signals.rsi_b > rsi_b_upper):
+            return EntrySignal(should_enter=False, skip_reason="rsi_asset")
 
     # Equity floor
     if current_equity < equity_floor:

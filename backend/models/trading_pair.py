@@ -32,6 +32,10 @@ class TradingPair(SQLModel, table=True):
     rsi_upper: float = 70.0
     rsi_lower: float = 20.0
     rsi_period: int = 14
+    rsi_a_lower: float = 10.0
+    rsi_a_upper: float = 70.0
+    rsi_b_lower: float = 10.0
+    rsi_b_upper: float = 70.0
 
     # Risk & sizing
     stop_loss_pct: float = 10.0
