@@ -17,7 +17,7 @@ INTERVAL_HOURS: dict[str, float] = {
     "1w": 168.0,
 }
 
-# Intervals routed to Lighter DEX candle data (short timeframes)
-LIGHTER_CANDLE_INTERVALS = {"1m", "5m", "15m", "30m", "1h"}
+# Intervals routed to Lighter DEX candle data
+LIGHTER_CANDLE_INTERVALS = {"1m", "5m", "15m", "30m", "1h", "4h", "12h"}
 
 DEFAULT_LIGHTER_HOST = "https://mainnet.zklighter.elliot.ai"
