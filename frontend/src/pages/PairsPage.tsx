@@ -6,7 +6,7 @@ import StatusBadge from "../components/StatusBadge";
 import { fmtDollar } from "../utils/formatNumber";
 import type { TradingPair, Credential } from "../types";
 
-const INTERVALS = ["15m", "1h", "2h", "4h", "8h", "12h", "1d"];
+const INTERVALS = ["15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d"];
 
 interface Market {
   market_id: number;
