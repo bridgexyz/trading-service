@@ -204,7 +204,7 @@ class LighterClient:
 
             order_api = lighter.OrderApi(self._api_client)
             resp = await order_api.account_active_orders(
-                by="index", value=str(self.account_index), market_id=market_index
+                account_index=self.account_index, market_id=market_index
             )
             orders = []
             raw_orders = getattr(resp, "orders", None) or []

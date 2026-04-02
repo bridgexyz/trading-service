@@ -374,6 +374,7 @@ async def _execute_limit_sliced_orders(
     )
 
     # Check actual positions on exchange
+    await asyncio.sleep(2)
     exchange_positions = await client.get_positions()
     exchange_by_market = {p["market_index"]: p for p in exchange_positions}
 
@@ -382,55 +383,52 @@ async def _execute_limit_sliced_orders(
     has_a = pos_a is not None
     has_b = pos_b is not None
 
-    # Sweep orphaned legs with market orders
+    if has_a and has_b:
+        # Both legs filled — use exchange prices as authoritative source
+        logger.info(f"[{pair.name}] Limit orders filled: A={pos_a['size']}@{pos_a['entry_price']}, B={pos_b['size']}@{pos_b['entry_price']}")
+        if last_result_a:
+            last_result_a.filled_price = pos_a["entry_price"]
+            last_result_a.filled_amount = pos_a["size"]
+        if last_result_b:
+            last_result_b.filled_price = pos_b["entry_price"]
+            last_result_b.filled_amount = pos_b["size"]
+        return last_result_a, last_result_b, completed
+
+    # Orphaned or unfilled — sweep any single-sided position
     if has_a and not has_b:
-        logger.warning(f"[{pair.name}] Orphaned leg A — sweeping with market order")
-        sweep_size = pos_a["size"]
-        sweep_is_ask = not is_ask_a  # reverse direction to close
+        logger.warning(f"[{pair.name}] Only leg A filled ({pos_a['size']}), sweeping with market order")
+        sweep_is_ask = not is_ask_a
         ob_a = await fetch_orderbook(pair.lighter_market_a)
         sweep_price = ob_a["mid_price"] * (0.99 if sweep_is_ask else 1.01)
         await client.place_order(
             market_index=pair.lighter_market_a,
-            base_amount=sweep_size,
+            base_amount=pos_a["size"],
             price=sweep_price,
             is_ask=sweep_is_ask,
             market=True,
             reduce_only=True,
         )
         logger.info(f"[{pair.name}] Swept orphaned leg A")
-        return None, None, 0  # treat as failed — no valid paired position
 
     if has_b and not has_a:
-        logger.warning(f"[{pair.name}] Orphaned leg B — sweeping with market order")
-        sweep_size = pos_b["size"]
+        logger.warning(f"[{pair.name}] Only leg B filled ({pos_b['size']}), sweeping with market order")
         sweep_is_ask = not is_ask_b
         ob_b = await fetch_orderbook(pair.lighter_market_b)
         sweep_price = ob_b["mid_price"] * (0.99 if sweep_is_ask else 1.01)
         await client.place_order(
             market_index=pair.lighter_market_b,
-            base_amount=sweep_size,
+            base_amount=pos_b["size"],
             price=sweep_price,
             is_ask=sweep_is_ask,
             market=True,
             reduce_only=True,
         )
         logger.info(f"[{pair.name}] Swept orphaned leg B")
-        return None, None, 0
 
     if not has_a and not has_b:
         logger.warning(f"[{pair.name}] No positions filled after limit orders")
-        return None, None, 0
 
-    # Both legs filled — set VWAP on results
-    # Re-read exchange fill prices as the authoritative source
-    if last_result_a:
-        last_result_a.filled_price = pos_a["entry_price"]
-        last_result_a.filled_amount = pos_a["size"]
-    if last_result_b:
-        last_result_b.filled_price = pos_b["entry_price"]
-        last_result_b.filled_amount = pos_b["size"]
-
-    return last_result_a, last_result_b, completed
+    return None, None, 0
 
 
 async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
@@ -537,6 +535,16 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                            message="Limit entry: no paired position established",
                            close_a=close_a, close_b=close_b)
                 return
+            if completed_chunks < pair.slice_chunks:
+                entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
+                logger.warning(
+                    f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks, "
+                    f"notional reduced to ${entry.notional:.0f}"
+                )
+                _notify(
+                    f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks. "
+                    f"Notional: ${entry.notional:.0f}"
+                )
         else:
             # Worst price with slippage tolerance for IOC market orders
             SLIPPAGE = 0.01
