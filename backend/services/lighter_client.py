@@ -190,87 +190,48 @@ class LighterClient:
             logger.error(f"Order failed: {e}")
             return OrderResult(success=False, error=str(e))
 
-    async def place_twap_order(
-        self,
-        market_index: int,
-        base_amount: float,
-        price: float,
-        is_ask: bool,
-        duration_minutes: int,
-        client_order_index: int | None = None,
-        reduce_only: bool = False,
-    ) -> OrderResult:
-        """Place a TWAP order on Lighter.
+    async def get_open_orders(self, market_index: int) -> list[dict]:
+        """Get open orders for a specific market.
 
-        The exchange handles time-slicing server-side over the given duration.
-
-        Args:
-            market_index: Lighter market index.
-            base_amount: Quantity in asset units.
-            price: Worst acceptable price.
-            is_ask: True for sell, False for buy.
-            duration_minutes: TWAP execution window in minutes.
-            client_order_index: Unique order reference. Auto-generated if None.
+        Returns list of dicts with keys: order_id, market_index, side, price, amount, status.
         """
         await self._ensure_clients()
-
-        if client_order_index is None:
-            client_order_index = int(time.time() * 1000) % (2**31)
-
         if self._mock_mode:
-            logger.info(
-                f"MOCK TWAP order: market={market_index}, amount={base_amount:.4f}, "
-                f"price={price:.2f}, side={'sell' if is_ask else 'buy'}, "
-                f"duration={duration_minutes}min"
-            )
-            return OrderResult(success=True, order_id=f"mock-twap-{client_order_index}")
+            return []
 
         try:
-            meta = await self._get_market_meta(market_index)
-            price_int = int(round(price * 10 ** meta["price_decimals"]))
-            amount_int = int(round(base_amount * 10 ** meta["size_decimals"]))
-            logger.debug(
-                f"TWAP encode: price={price} → {price_int} ({meta['price_decimals']}dp), "
-                f"amount={base_amount} → {amount_int} ({meta['size_decimals']}dp), "
-                f"duration={duration_minutes}min"
-            )
+            import lighter
 
-            # Lighter enforces a minimum 5-minute TWAP duration
-            effective_duration = max(duration_minutes, 5)
-            order, resp, error = await self._signer_client.create_order(
-                market_index=market_index,
-                client_order_index=client_order_index,
-                base_amount=amount_int,
-                price=price_int,
-                is_ask=is_ask,
-                order_type=6,           # TWAP
-                time_in_force=1,        # GOOD_TILL_TIME
-                order_expiry=int((time.time() + effective_duration * 60) * 1000),
-                reduce_only=reduce_only,
+            order_api = lighter.OrderApi(self._api_client)
+            resp = await order_api.account_active_orders(
+                by="index", value=str(self.account_index), market_id=market_index
             )
-            if error is not None:
-                logger.error(f"TWAP order rejected: {error}")
-                return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
-            order_id = str(client_order_index)
-            # avg_execution_price is the actual fill; order.price is the limit/worst we submitted
-            raw_price = getattr(order, "avg_execution_price", None) or getattr(order, "price", None)
-            raw_amount = getattr(order, "filled_amount", None) or getattr(order, "base_amount", None)
-            order_status = getattr(order, "status", None)
-            # Decode raw integer values back to human-readable using market decimals
-            filled_price = float(raw_price) / 10 ** meta["price_decimals"] if raw_price is not None else None
-            filled_amount = float(raw_amount) / 10 ** meta["size_decimals"] if raw_amount is not None else None
-            logger.info(f"TWAP order placed: {order_id} (duration={duration_minutes}min), fill_price={filled_price}, fill_amount={filled_amount}")
-            return OrderResult(
-                success=True,
-                order_id=order_id,
-                filled_price=filled_price,
-                filled_amount=filled_amount,
-                order_status=str(order_status) if order_status is not None else None,
-                raw_response=str(resp) if resp else None,
-            )
+            orders = []
+            raw_orders = getattr(resp, "orders", None) or []
+            for o in raw_orders:
+                orders.append({
+                    "order_id": str(getattr(o, "order_index", "")),
+                    "market_index": int(getattr(o, "market_id", market_index)),
+                    "side": "sell" if getattr(o, "is_ask", False) else "buy",
+                    "price": float(getattr(o, "price", 0)),
+                    "amount": float(getattr(o, "base_amount", 0)),
+                })
+            return orders
         except Exception as e:
-            logger.error(f"TWAP order failed: {e}")
-            return OrderResult(success=False, error=str(e))
+            logger.error(f"Failed to fetch open orders for market {market_index}: {e}")
+            return []
+
+    async def cancel_all_orders(self, market_index: int) -> bool:
+        """Cancel all open orders for a specific market."""
+        orders = await self.get_open_orders(market_index)
+        if not orders:
+            return True
+
+        success = True
+        for order in orders:
+            if not await self.cancel_order(market_index, order["order_id"]):
+                success = False
+        return success
 
     async def cancel_order(self, market_index: int, order_id: str) -> bool:
         """Cancel an order."""

@@ -4,6 +4,7 @@ Manages per-pair interval jobs that run the trading engine.
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -22,14 +23,30 @@ def _job_id(pair_id: int) -> str:
     return f"pair_{pair_id}"
 
 
-def _get_trigger(interval: str) -> IntervalTrigger:
-    # Support arbitrary "<N>m" schedule intervals
+def _interval_to_minutes(interval: str) -> int:
+    """Parse an interval string to total minutes."""
     if interval.endswith("m") and interval[:-1].isdigit():
-        return IntervalTrigger(minutes=int(interval[:-1]))
+        return int(interval[:-1])
     hours = INTERVAL_HOURS.get(interval, 4.0)
-    if hours < 1:
-        return IntervalTrigger(minutes=int(hours * 60))
-    return IntervalTrigger(hours=hours)
+    return int(hours * 60)
+
+
+def _next_interval_boundary(minutes: int) -> datetime:
+    """Compute the next clean UTC time boundary for a given interval."""
+    now = datetime.now(timezone.utc)
+    total_minutes = now.hour * 60 + now.minute
+    next_boundary = ((total_minutes // minutes) + 1) * minutes
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + timedelta(minutes=next_boundary)
+
+
+def _get_trigger(interval: str) -> IntervalTrigger:
+    minutes = _interval_to_minutes(interval)
+    # Align to UTC boundaries for sub-2h intervals
+    if minutes < 120:
+        start = _next_interval_boundary(minutes)
+        return IntervalTrigger(minutes=minutes, start_date=start)
+    return IntervalTrigger(hours=minutes / 60)
 
 
 def add_pair_job(pair_id: int, schedule_interval: str):

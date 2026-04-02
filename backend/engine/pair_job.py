@@ -169,17 +169,7 @@ async def _run_pair_cycle_once(pair_id: int):
 
 
 async def _place_pair_order(client, pair, market_index, base_amount, price, is_ask, reduce_only=False):
-    """Place a market or TWAP order depending on pair config."""
-    order_mode = getattr(pair, "order_mode", "market")
-    if order_mode == "twap":
-        return await client.place_twap_order(
-            market_index=market_index,
-            base_amount=base_amount,
-            price=price,
-            is_ask=is_ask,
-            duration_minutes=pair.twap_minutes,
-            reduce_only=reduce_only,
-        )
+    """Place a market order for a pair leg."""
     return await client.place_order(
         market_index=market_index,
         base_amount=base_amount,
@@ -283,6 +273,166 @@ async def _execute_sliced_orders(
     return last_result_a, last_result_b, completed
 
 
+async def _execute_limit_sliced_orders(
+    client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=False
+):
+    """Execute limit orders in N smaller chunks, then clean up unfilled orders.
+
+    Places limit orders at orderbook mid-price (no slippage). After all chunks,
+    waits 30 seconds, cancels unfilled orders, and sweeps any orphaned legs
+    with market orders to ensure no single-sided exposure remains.
+
+    Returns (last_result_a, last_result_b, completed_chunks).
+    """
+    from backend.services.market_data import fetch_orderbook
+
+    chunk_size_a = size_a / pair.slice_chunks
+    chunk_size_b = size_b / pair.slice_chunks
+
+    last_result_a = None
+    last_result_b = None
+    completed = 0
+    total_fill_qty_a = 0.0
+    total_fill_value_a = 0.0
+    total_fill_qty_b = 0.0
+    total_fill_value_b = 0.0
+    order_ids_a = []
+    order_ids_b = []
+
+    for i in range(pair.slice_chunks):
+        ob_a, ob_b = await asyncio.gather(
+            fetch_orderbook(pair.lighter_market_a),
+            fetch_orderbook(pair.lighter_market_b),
+        )
+        mid_a = ob_a["mid_price"]
+        mid_b = ob_b["mid_price"]
+
+        if mid_a <= 0 or mid_b <= 0:
+            logger.error(f"[{pair.name}] Limit chunk {i+1}: invalid mid prices (A={mid_a}, B={mid_b}), stopping")
+            break
+
+        result_a = await client.place_order(
+            market_index=pair.lighter_market_a,
+            base_amount=chunk_size_a,
+            price=mid_a,
+            is_ask=is_ask_a,
+            market=False,
+            reduce_only=reduce_only,
+        )
+
+        if not result_a.success:
+            logger.error(f"[{pair.name}] Limit chunk {i+1} leg A failed: {result_a.error}")
+            break
+
+        result_b = await client.place_order(
+            market_index=pair.lighter_market_b,
+            base_amount=chunk_size_b,
+            price=mid_b,
+            is_ask=is_ask_b,
+            market=False,
+            reduce_only=reduce_only,
+        )
+
+        if not result_b.success:
+            logger.warning(f"[{pair.name}] Limit chunk {i+1} leg B failed, cancelling leg A")
+            await client.cancel_order(
+                market_index=pair.lighter_market_a, order_id=result_a.order_id
+            )
+            break
+
+        last_result_a = result_a
+        last_result_b = result_b
+        completed += 1
+        if result_a.order_id:
+            order_ids_a.append(result_a.order_id)
+        if result_b.order_id:
+            order_ids_b.append(result_b.order_id)
+
+        if result_a.filled_price and result_a.filled_amount:
+            total_fill_qty_a += result_a.filled_amount
+            total_fill_value_a += result_a.filled_price * result_a.filled_amount
+        if result_b.filled_price and result_b.filled_amount:
+            total_fill_qty_b += result_b.filled_amount
+            total_fill_value_b += result_b.filled_price * result_b.filled_amount
+        logger.info(f"[{pair.name}] Limit chunk {completed}/{pair.slice_chunks} placed")
+
+        if i < pair.slice_chunks - 1:
+            await asyncio.sleep(pair.slice_delay_sec)
+
+    if completed == 0:
+        return last_result_a, last_result_b, 0
+
+    # Wait 30 seconds for limit orders to fill
+    logger.info(f"[{pair.name}] Waiting 30s for limit orders to fill...")
+    await asyncio.sleep(30)
+
+    # Cancel any remaining open orders
+    logger.info(f"[{pair.name}] Cancelling unfilled limit orders")
+    await asyncio.gather(
+        client.cancel_all_orders(pair.lighter_market_a),
+        client.cancel_all_orders(pair.lighter_market_b),
+    )
+
+    # Check actual positions on exchange
+    exchange_positions = await client.get_positions()
+    exchange_by_market = {p["market_index"]: p for p in exchange_positions}
+
+    pos_a = exchange_by_market.get(pair.lighter_market_a)
+    pos_b = exchange_by_market.get(pair.lighter_market_b)
+    has_a = pos_a is not None
+    has_b = pos_b is not None
+
+    # Sweep orphaned legs with market orders
+    if has_a and not has_b:
+        logger.warning(f"[{pair.name}] Orphaned leg A — sweeping with market order")
+        sweep_size = pos_a["size"]
+        sweep_is_ask = not is_ask_a  # reverse direction to close
+        ob_a = await fetch_orderbook(pair.lighter_market_a)
+        sweep_price = ob_a["mid_price"] * (0.99 if sweep_is_ask else 1.01)
+        await client.place_order(
+            market_index=pair.lighter_market_a,
+            base_amount=sweep_size,
+            price=sweep_price,
+            is_ask=sweep_is_ask,
+            market=True,
+            reduce_only=True,
+        )
+        logger.info(f"[{pair.name}] Swept orphaned leg A")
+        return None, None, 0  # treat as failed — no valid paired position
+
+    if has_b and not has_a:
+        logger.warning(f"[{pair.name}] Orphaned leg B — sweeping with market order")
+        sweep_size = pos_b["size"]
+        sweep_is_ask = not is_ask_b
+        ob_b = await fetch_orderbook(pair.lighter_market_b)
+        sweep_price = ob_b["mid_price"] * (0.99 if sweep_is_ask else 1.01)
+        await client.place_order(
+            market_index=pair.lighter_market_b,
+            base_amount=sweep_size,
+            price=sweep_price,
+            is_ask=sweep_is_ask,
+            market=True,
+            reduce_only=True,
+        )
+        logger.info(f"[{pair.name}] Swept orphaned leg B")
+        return None, None, 0
+
+    if not has_a and not has_b:
+        logger.warning(f"[{pair.name}] No positions filled after limit orders")
+        return None, None, 0
+
+    # Both legs filled — set VWAP on results
+    # Re-read exchange fill prices as the authoritative source
+    if last_result_a:
+        last_result_a.filled_price = pos_a["entry_price"]
+        last_result_a.filled_amount = pos_a["size"]
+    if last_result_b:
+        last_result_b.filled_price = pos_b["entry_price"]
+        last_result_b.filled_amount = pos_b["size"]
+
+    return last_result_a, last_result_b, completed
+
+
 async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute entry if conditions are met."""
     # Compute position size from account balance percentage
@@ -369,7 +519,6 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                            close_a=close_a, close_b=close_b)
                 return
             if completed_chunks < pair.slice_chunks:
-                # Partial fill — scale down notional proportionally
                 entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
                 logger.warning(
                     f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks, "
@@ -379,6 +528,15 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                     f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks. "
                     f"Notional: ${entry.notional:.0f}"
                 )
+        elif order_mode == "limit":
+            result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
+                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
+            )
+            if completed_chunks == 0 or result_a is None or result_b is None:
+                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                           message="Limit entry: no paired position established",
+                           close_a=close_a, close_b=close_b)
+                return
         else:
             # Worst price with slippage tolerance for IOC market orders
             SLIPPAGE = 0.01
@@ -404,7 +562,7 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                 return
 
         # Verify positions actually exist on the exchange
-        # (skip for TWAP — slices fill over minutes, not immediately)
+        # (skip for limit — already verified inside _execute_limit_sliced_orders)
         if order_mode in ("market", "sliced"):
             settle_delay = 2 if order_mode == "sliced" else 1
             await asyncio.sleep(settle_delay)
@@ -455,7 +613,7 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                 lighter_order_id_a=result_a.order_id,
                 lighter_order_id_b=result_b.order_id,
                 fill_price_a=exchange_fill_a if order_mode in ("market", "sliced") else result_a.filled_price,
-                fill_price_b=exchange_fill_b if order_mode in ("market", "sliced") else result_b.filled_price,
+                fill_price_b=exchange_fill_b if order_mode in ("market", "sliced") else result_b.filled_price,  # limit mode sets filled_price from exchange
                 fill_amount_a=result_a.filled_amount,
                 fill_amount_b=result_b.filled_amount,
             )
@@ -593,7 +751,6 @@ async def execute_exit(
                            close_a=close_a, close_b=close_b)
                 return
             if completed_chunks < pair.slice_chunks:
-                # Partial exit — don't delete position; next cycle re-reads exchange sizes
                 logger.warning(
                     f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks"
                 )
@@ -604,6 +761,24 @@ async def execute_exit(
                 _log_cycle(pair.id, "error", signals=signals, action="exit_partial",
                            message=f"Sliced exit partial: {completed_chunks}/{pair.slice_chunks} chunks",
                            close_a=close_a, close_b=close_b)
+                return
+        elif order_mode == "limit":
+            result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
+                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
+            )
+            if completed_chunks == 0 or result_a is None or result_b is None:
+                # Limit exit cleanup already swept orphans; check if positions remain
+                exchange_positions = await lighter_client.get_positions()
+                remaining = {p["market_index"] for p in exchange_positions}
+                has_remaining = pair.lighter_market_a in remaining or pair.lighter_market_b in remaining
+                if has_remaining:
+                    _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                               message="Limit exit failed — positions still open, will retry next cycle",
+                               close_a=close_a, close_b=close_b)
+                else:
+                    _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                               message="Limit exit: no fills but positions already closed",
+                               close_a=close_a, close_b=close_b)
                 return
         else:
             # Worst price with slippage tolerance
@@ -630,7 +805,7 @@ async def execute_exit(
                 return
 
         # Verify positions are actually closed on the exchange (with retries)
-        # (skip for TWAP — slices close over minutes, not immediately)
+        # (skip for limit — already verified inside _execute_limit_sliced_orders)
         if order_mode in ("market", "sliced"):
             settle_delays = [3, 6, 10] if order_mode == "market" else [3, 6, 15]
             positions_closed = False

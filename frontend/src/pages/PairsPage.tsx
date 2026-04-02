@@ -36,8 +36,7 @@ const defaultPair = {
   stop_loss_pct: 10,
   position_size_pct: 50,
   leverage: 5,
-  twap_minutes: 0,
-  order_mode: "market" as "market" | "twap" | "sliced",
+  order_mode: "market" as "market" | "sliced" | "limit",
   slice_chunks: 10,
   slice_delay_sec: 2.0,
   schedule_interval: 10,
@@ -296,11 +295,8 @@ function PairForm({
         <Field label="Stop Loss %" value={form.stop_loss_pct} onChange={(v) => set("stop_loss_pct", v)} />
         <Field label="Position Size (%)" value={form.position_size_pct} onChange={(v) => set("position_size_pct", v)} />
         <Field label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} />
-        <SelectField label="Order Mode" value={form.order_mode as string} onChange={(v) => set("order_mode", v)} options={["market", "twap", "sliced"]} />
-        {form.order_mode === "twap" && (
-          <Field label="TWAP (min)" value={form.twap_minutes} onChange={(v) => set("twap_minutes", v)} />
-        )}
-        {form.order_mode === "sliced" && (
+        <SelectField label="Order Mode" value={form.order_mode as string} onChange={(v) => set("order_mode", v)} options={["market", "sliced", "limit"]} />
+        {(form.order_mode === "sliced" || form.order_mode === "limit") && (
           <>
             <Field label="Chunks" value={form.slice_chunks} onChange={(v) => set("slice_chunks", v)} />
             <Field label="Delay (sec)" value={form.slice_delay_sec} onChange={(v) => set("slice_delay_sec", v)} />
@@ -466,8 +462,7 @@ export default function PairsPage() {
     stop_loss_pct: pair.stop_loss_pct,
     position_size_pct: pair.position_size_pct,
     leverage: pair.leverage,
-    twap_minutes: pair.twap_minutes,
-    order_mode: (pair.order_mode || "market") as "market" | "twap" | "sliced",
+    order_mode: (pair.order_mode || "market") as "market" | "sliced" | "limit",
     slice_chunks: pair.slice_chunks ?? 10,
     slice_delay_sec: pair.slice_delay_sec ?? 2.0,
     schedule_interval: parseInt(pair.schedule_interval) || 10,

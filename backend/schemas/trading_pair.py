@@ -32,8 +32,7 @@ class TradingPairCreate(BaseModel):
     stop_loss_pct: float = Field(default=10.0, ge=0)
     position_size_pct: float = Field(default=50.0, gt=0, le=100)
     leverage: float = Field(default=5.0, gt=0)
-    twap_minutes: int = Field(default=0, ge=0)
-    order_mode: Literal["market", "twap", "sliced"] = "market"
+    order_mode: Literal["market", "sliced", "limit"] = "market"
     slice_chunks: int = Field(default=10, ge=2, le=50)
     slice_delay_sec: float = Field(default=2.0, ge=0.5, le=30)
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
@@ -105,8 +104,7 @@ class TradingPairUpdate(BaseModel):
     stop_loss_pct: float | None = Field(default=None, ge=0)
     position_size_pct: float | None = Field(default=None, gt=0, le=100)
     leverage: float | None = Field(default=None, gt=0)
-    twap_minutes: int | None = Field(default=None, ge=0)
-    order_mode: Literal["market", "twap", "sliced"] | None = None
+    order_mode: Literal["market", "sliced", "limit"] | None = None
     slice_chunks: int | None = Field(default=None, ge=2, le=50)
     slice_delay_sec: float | None = Field(default=None, ge=0.5, le=30)
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
@@ -193,7 +191,6 @@ class TradingPairRead(BaseModel):
     stop_loss_pct: float
     position_size_pct: float
     leverage: float
-    twap_minutes: int
     order_mode: str
     slice_chunks: int
     slice_delay_sec: float

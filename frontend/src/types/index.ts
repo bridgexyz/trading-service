@@ -24,7 +24,6 @@ export interface TradingPair {
   stop_loss_pct: number;
   position_size_pct: number;
   leverage: number;
-  twap_minutes: number;
   order_mode: string;
   slice_chunks: number;
   slice_delay_sec: number;
