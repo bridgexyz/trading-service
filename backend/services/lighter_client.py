@@ -190,48 +190,28 @@ class LighterClient:
             logger.error(f"Order failed: {e}")
             return OrderResult(success=False, error=str(e))
 
-    async def get_open_orders(self, market_index: int) -> list[dict]:
-        """Get open orders for a specific market.
-
-        Returns list of dicts with keys: order_id, market_index, side, price, amount, status.
-        """
+    async def cancel_all_orders(self) -> bool:
+        """Cancel all open orders across all markets."""
         await self._ensure_clients()
         if self._mock_mode:
-            return []
-
-        try:
-            import lighter
-
-            order_api = lighter.OrderApi(self._api_client)
-            resp = await order_api.account_active_orders(
-                account_index=self.account_index, market_id=market_index
-            )
-            orders = []
-            raw_orders = getattr(resp, "orders", None) or []
-            for o in raw_orders:
-                orders.append({
-                    "order_id": str(getattr(o, "order_index", "")),
-                    "market_index": int(getattr(o, "market_id", market_index)),
-                    "side": "sell" if getattr(o, "is_ask", False) else "buy",
-                    "price": float(getattr(o, "price", 0)),
-                    "amount": float(getattr(o, "base_amount", 0)),
-                })
-            return orders
-        except Exception as e:
-            logger.error(f"Failed to fetch open orders for market {market_index}: {e}")
-            return []
-
-    async def cancel_all_orders(self, market_index: int) -> bool:
-        """Cancel all open orders for a specific market."""
-        orders = await self.get_open_orders(market_index)
-        if not orders:
+            logger.info("MOCK cancel all orders")
             return True
 
-        success = True
-        for order in orders:
-            if not await self.cancel_order(market_index, order["order_id"]):
-                success = False
-        return success
+        try:
+            import time as _time
+            timestamp_ms = int(_time.time() * 1000)
+            _result, resp, error = await self._signer_client.cancel_all_orders(
+                time_in_force=0,  # IMMEDIATE
+                timestamp_ms=timestamp_ms,
+            )
+            if error is not None:
+                logger.error(f"Cancel all orders failed: {error}")
+                return False
+            logger.info("Cancelled all open orders")
+            return True
+        except Exception as e:
+            logger.error(f"Cancel all orders failed: {e}")
+            return False
 
     async def cancel_order(self, market_index: int, order_id: str) -> bool:
         """Cancel an order."""

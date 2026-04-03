@@ -368,15 +368,15 @@ async def _execute_limit_sliced_orders(
 
     # Cancel any remaining open orders
     logger.info(f"[{pair.name}] Cancelling unfilled limit orders")
-    await asyncio.gather(
-        client.cancel_all_orders(pair.lighter_market_a),
-        client.cancel_all_orders(pair.lighter_market_b),
-    )
+    await client.cancel_all_orders()
 
     # Check actual positions on exchange
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
     exchange_positions = await client.get_positions()
     exchange_by_market = {p["market_index"]: p for p in exchange_positions}
+    logger.info(
+        f"[{pair.name}] Post-limit positions: {[{k: (v['side'], v['size'])} for k, v in exchange_by_market.items()]}"
+    )
 
     pos_a = exchange_by_market.get(pair.lighter_market_a)
     pos_b = exchange_by_market.get(pair.lighter_market_b)
