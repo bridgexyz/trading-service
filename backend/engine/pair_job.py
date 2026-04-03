@@ -311,10 +311,20 @@ async def _execute_limit_sliced_orders(
             logger.error(f"[{pair.name}] Limit chunk {i+1}: invalid mid prices (A={mid_a}, B={mid_b}), stopping")
             break
 
+        # For entries, offset price 0.02% to cross spread slightly for faster fills
+        # For exits (reduce_only), use exact mid-price
+        LIMIT_OFFSET = 0.0002
+        if not reduce_only:
+            price_a = mid_a * (1 - LIMIT_OFFSET) if is_ask_a else mid_a * (1 + LIMIT_OFFSET)
+            price_b = mid_b * (1 - LIMIT_OFFSET) if is_ask_b else mid_b * (1 + LIMIT_OFFSET)
+        else:
+            price_a = mid_a
+            price_b = mid_b
+
         result_a = await client.place_order(
             market_index=pair.lighter_market_a,
             base_amount=chunk_size_a,
-            price=mid_a,
+            price=price_a,
             is_ask=is_ask_a,
             market=False,
             reduce_only=reduce_only,
@@ -327,7 +337,7 @@ async def _execute_limit_sliced_orders(
         result_b = await client.place_order(
             market_index=pair.lighter_market_b,
             base_amount=chunk_size_b,
-            price=mid_b,
+            price=price_b,
             is_ask=is_ask_b,
             market=False,
             reduce_only=reduce_only,
