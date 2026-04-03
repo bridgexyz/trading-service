@@ -681,12 +681,17 @@ async def execute_exit(
         fallback_size_a = abs(units)
         fallback_size_b = abs(units * position.entry_hedge_ratio)
 
+        # 1. Cancel all unfilled entry orders
+        logger.info(f"[{pair.name}] Cancelling open orders before exit")
+        await lighter_client.cancel_all_orders()
+        await asyncio.sleep(2)
+
         # Snapshot realized PnL before exit (for delta calculation)
         pnl_before = await lighter_client.get_realized_pnl(
             [pair.lighter_market_a, pair.lighter_market_b]
         )
 
-        # Fetch actual position sizes from exchange
+        # 2. Get actual open position sizes from exchange
         exchange_positions = await lighter_client.get_positions()
         exchange_by_market = {p["market_index"]: p for p in exchange_positions}
 
@@ -696,11 +701,11 @@ async def execute_exit(
         size_b = pos_b["size"] if pos_b else fallback_size_b
 
         if pos_a:
-            logger.info(f"[{pair.name}] Exit leg A: using exchange size {size_a:.6f}")
+            logger.info(f"[{pair.name}] Exit leg A: exchange size {size_a:.6f}")
         else:
             logger.warning(f"[{pair.name}] Exit leg A: no exchange position, using calculated size {size_a:.6f}")
         if pos_b:
-            logger.info(f"[{pair.name}] Exit leg B: using exchange size {size_b:.6f}")
+            logger.info(f"[{pair.name}] Exit leg B: exchange size {size_b:.6f}")
         else:
             logger.warning(f"[{pair.name}] Exit leg B: no exchange position, using calculated size {size_b:.6f}")
 
