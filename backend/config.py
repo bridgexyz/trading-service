@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 1440  # 24 hours
+    jwt_expire_minutes: int = 43200  # 30 days
 
     # Telegram
     telegram_bot_token: str = ""
