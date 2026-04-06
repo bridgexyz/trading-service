@@ -42,11 +42,9 @@ def _next_interval_boundary(minutes: int) -> datetime:
 
 def _get_trigger(interval: str) -> IntervalTrigger:
     minutes = _interval_to_minutes(interval)
-    # Align to UTC boundaries for sub-2h intervals
-    if minutes < 120:
-        start = _next_interval_boundary(minutes)
-        return IntervalTrigger(minutes=minutes, start_date=start)
-    return IntervalTrigger(hours=minutes / 60)
+    # Align to UTC boundaries, 5s early so data is ready when the candle closes
+    start = _next_interval_boundary(minutes) - timedelta(seconds=5)
+    return IntervalTrigger(minutes=minutes, start_date=start)
 
 
 def add_pair_job(pair_id: int, schedule_interval: str):
