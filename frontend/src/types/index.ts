@@ -28,6 +28,10 @@ export interface TradingPair {
   slice_chunks: number;
   slice_delay_sec: number;
   min_equity_pct: number;
+  cooldown_losses: number;
+  cooldown_loss_pct: number;
+  cooldown_drawdown_pct: number;
+  cooldown_candles: number;
   schedule_interval: string;
   exit_schedule_interval: string;
   use_exit_schedule: boolean;

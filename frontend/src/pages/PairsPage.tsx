@@ -39,6 +39,10 @@ const defaultPair = {
   order_mode: "market" as "market" | "sliced" | "limit",
   slice_chunks: 10,
   slice_delay_sec: 2.0,
+  cooldown_losses: 0,
+  cooldown_loss_pct: 0,
+  cooldown_drawdown_pct: 0,
+  cooldown_candles: 0,
   schedule_interval: 10,
   exit_schedule_interval: 10,
   use_exit_schedule: false,
@@ -304,6 +308,14 @@ function PairForm({
         )}
       </div>
 
+      <SectionLabel>Cooldown</SectionLabel>
+      <div className="flex flex-wrap gap-3">
+        <Field label="Consec. Losses" value={form.cooldown_losses} onChange={(v) => set("cooldown_losses", v)} />
+        <Field label="Loss Sum %" value={form.cooldown_loss_pct} onChange={(v) => set("cooldown_loss_pct", v)} />
+        <Field label="Max Drawdown %" value={form.cooldown_drawdown_pct} onChange={(v) => set("cooldown_drawdown_pct", v)} />
+        <Field label="Wait Candles" value={form.cooldown_candles} onChange={(v) => set("cooldown_candles", v)} />
+      </div>
+
       <SectionLabel>Schedule & Credential</SectionLabel>
       <div className="flex flex-wrap gap-3 items-end">
         <Field label={form.use_exit_schedule ? "Entry Interval (min)" : "Schedule Interval (min)"} value={form.schedule_interval} onChange={(v) => set("schedule_interval", v)} />
@@ -465,6 +477,10 @@ export default function PairsPage() {
     order_mode: (pair.order_mode || "market") as "market" | "sliced" | "limit",
     slice_chunks: pair.slice_chunks ?? 10,
     slice_delay_sec: pair.slice_delay_sec ?? 2.0,
+    cooldown_losses: pair.cooldown_losses ?? 0,
+    cooldown_loss_pct: pair.cooldown_loss_pct ?? 0,
+    cooldown_drawdown_pct: pair.cooldown_drawdown_pct ?? 0,
+    cooldown_candles: pair.cooldown_candles ?? 0,
     schedule_interval: parseInt(pair.schedule_interval) || 10,
     exit_schedule_interval: parseInt(pair.exit_schedule_interval) || 10,
     use_exit_schedule: pair.use_exit_schedule ?? false,

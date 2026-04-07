@@ -7,7 +7,7 @@ data fetch → signal computation → entry/exit decisions → order execution �
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 from sqlmodel import Session, select
@@ -392,8 +392,66 @@ async def _execute_limit_sliced_orders(
     return last_result_a, last_result_b, completed
 
 
+def _check_cooldown(pair: TradingPair) -> bool:
+    """Check if pair is in cooldown or should enter cooldown. Returns True if entry should be skipped."""
+    if pair.cooldown_candles <= 0:
+        return False
+    if pair.cooldown_losses <= 0 and pair.cooldown_drawdown_pct <= 0:
+        return False
+
+    # Already in active cooldown?
+    if pair.cooldown_until and datetime.now(timezone.utc) < pair.cooldown_until:
+        return True
+
+    # Check consecutive losses from Trade table
+    with Session(engine) as session:
+        recent_trades = session.exec(
+            select(Trade).where(Trade.pair_id == pair.id)
+            .order_by(Trade.exit_time.desc()).limit(max(pair.cooldown_losses, 20))
+        ).all()
+
+    consecutive_losses = 0
+    cumulative_loss_pct = 0.0
+    for t in recent_trades:
+        if t.pnl >= 0:
+            break
+        consecutive_losses += 1
+        cumulative_loss_pct += abs(t.pnl_pct)
+
+    triggered = False
+    # Trigger 1: N+ consecutive losses AND cumulative % exceeds threshold
+    if (pair.cooldown_losses > 0 and pair.cooldown_loss_pct > 0
+            and consecutive_losses >= pair.cooldown_losses
+            and cumulative_loss_pct >= pair.cooldown_loss_pct):
+        triggered = True
+    # Trigger 2: cumulative consecutive loss % exceeds max drawdown (any count)
+    if pair.cooldown_drawdown_pct > 0 and cumulative_loss_pct >= pair.cooldown_drawdown_pct:
+        triggered = True
+
+    if triggered:
+        from backend.engine.scheduler import _interval_to_minutes
+        interval_min = _interval_to_minutes(pair.schedule_interval)
+        cooldown_end = datetime.now(timezone.utc) + timedelta(minutes=interval_min * pair.cooldown_candles)
+        with Session(engine) as session:
+            db_pair = session.get(TradingPair, pair.id)
+            db_pair.cooldown_until = cooldown_end
+            session.add(db_pair)
+            session.commit()
+        logger.info(f"Pair {pair.id}: cooldown triggered ({consecutive_losses} losses, {cumulative_loss_pct:.1f}% cumulative), until {cooldown_end}")
+        return True
+
+    return False
+
+
 async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
     """Evaluate and execute entry if conditions are met."""
+    # Cooldown check — short-circuit before any API calls
+    if _check_cooldown(pair):
+        _log_cycle(pair.id, "success", signals=signals, action="skip:cooldown",
+                   message="Entry paused: cooldown active",
+                   close_a=close_a, close_b=close_b, market_data=market_data)
+        return
+
     # Compute position size from account balance percentage
     lighter_client = await _get_lighter_client(pair.credential_id)
     if lighter_client is None:
@@ -587,6 +645,11 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                 fill_amount_b=result_b.filled_amount,
             )
             session.add(pos)
+            # Clear cooldown on successful entry
+            db_pair = session.get(TradingPair, pair.id)
+            if db_pair.cooldown_until is not None:
+                db_pair.cooldown_until = None
+                session.add(db_pair)
             session.commit()
 
         direction_str = "entry_long" if entry.direction == 1 else "entry_short"

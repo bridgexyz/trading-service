@@ -36,6 +36,10 @@ class TradingPairCreate(BaseModel):
     slice_chunks: int = Field(default=10, ge=2, le=50)
     slice_delay_sec: float = Field(default=2.0, ge=0.5, le=30)
     min_equity_pct: float = Field(default=40.0, ge=0, le=100)
+    cooldown_losses: int = Field(default=0, ge=0)
+    cooldown_loss_pct: float = Field(default=0.0, ge=0)
+    cooldown_drawdown_pct: float = Field(default=0.0, ge=0)
+    cooldown_candles: int = Field(default=0, ge=0)
     schedule_interval: str = "15m"
     exit_schedule_interval: str = "15m"
     use_exit_schedule: bool = False
@@ -108,6 +112,10 @@ class TradingPairUpdate(BaseModel):
     slice_chunks: int | None = Field(default=None, ge=2, le=50)
     slice_delay_sec: float | None = Field(default=None, ge=0.5, le=30)
     min_equity_pct: float | None = Field(default=None, ge=0, le=100)
+    cooldown_losses: int | None = Field(default=None, ge=0)
+    cooldown_loss_pct: float | None = Field(default=None, ge=0)
+    cooldown_drawdown_pct: float | None = Field(default=None, ge=0)
+    cooldown_candles: int | None = Field(default=None, ge=0)
     schedule_interval: str | None = None
     exit_schedule_interval: str | None = None
     use_exit_schedule: bool | None = None
@@ -195,6 +203,10 @@ class TradingPairRead(BaseModel):
     slice_chunks: int
     slice_delay_sec: float
     min_equity_pct: float
+    cooldown_losses: int
+    cooldown_loss_pct: float
+    cooldown_drawdown_pct: float
+    cooldown_candles: int
     schedule_interval: str
     exit_schedule_interval: str
     use_exit_schedule: bool

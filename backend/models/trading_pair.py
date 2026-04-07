@@ -48,6 +48,13 @@ class TradingPair(SQLModel, table=True):
     slice_delay_sec: float = 2.0  # delay between chunk iterations (seconds)
     min_equity_pct: float = 40.0
 
+    # Cooldown after losses
+    cooldown_losses: int = 0            # trigger 1: min consecutive losses
+    cooldown_loss_pct: float = 0.0      # trigger 1: cumulative loss % threshold
+    cooldown_drawdown_pct: float = 0.0  # trigger 2: max cumulative loss % (any count)
+    cooldown_candles: int = 0           # candles to wait before resuming entry
+    cooldown_until: datetime | None = None  # runtime: when cooldown expires
+
     # Scheduling
     schedule_interval: str = "15m"
     exit_schedule_interval: str = "15m"
