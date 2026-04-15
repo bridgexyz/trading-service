@@ -63,6 +63,44 @@ class LighterClient:
             logger.error(f"Failed to initialize Lighter clients: {e}")
             raise
 
+    async def reinit_signer(self):
+        """Rebuild the signer client. Use after a failed signed tx to avoid
+        nonce desync: if the SDK incremented its local nonce for a tx the
+        server rejected, the SDK is ahead of the server and every subsequent
+        signed call fails with 'invalid signature'. A fresh SignerClient
+        re-reads nonce from the server.
+        """
+        if self._mock_mode:
+            return
+        try:
+            old = self._signer_client
+            self._signer_client = None
+            if old is not None:
+                try:
+                    await old.close()
+                except Exception as e:
+                    logger.debug(f"Ignoring error closing old signer: {e}")
+            import lighter
+            self._signer_client = lighter.SignerClient(
+                url=self.host,
+                account_index=self.account_index,
+                api_private_keys={self.api_key_index: self.private_key},
+            )
+            logger.warning("Signer re-initialized (nonce resync)")
+        except Exception as e:
+            logger.error(f"Signer re-init failed: {e}")
+
+    @staticmethod
+    def _is_sign_error(err: str | None) -> bool:
+        if not err:
+            return False
+        e = err.lower()
+        return (
+            "invalid signature" in e
+            or "21120" in e
+            or "nonce" in e
+        )
+
     async def _get_market_meta(self, market_index: int) -> dict:
         """Fetch and cache price/size decimal info for a market."""
         if market_index in self._market_meta:
@@ -168,6 +206,8 @@ class LighterClient:
                 )
             if error is not None:
                 logger.error(f"Order rejected: {error}")
+                if self._is_sign_error(str(error)):
+                    await self.reinit_signer()
                 return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
             # avg_execution_price is the actual fill; order.price is the limit/worst we submitted
@@ -188,6 +228,8 @@ class LighterClient:
             )
         except Exception as e:
             logger.error(f"Order failed: {e}")
+            if self._is_sign_error(str(e)):
+                await self.reinit_signer()
             return OrderResult(success=False, error=str(e))
 
     async def cancel_all_orders(self) -> bool:
@@ -204,11 +246,15 @@ class LighterClient:
             )
             if error is not None:
                 logger.error(f"Cancel all orders failed: {error}")
+                # Any failure of a signed tx can leave nonce desynced — always
+                # reinit here so subsequent calls on this instance are safe.
+                await self.reinit_signer()
                 return False
             logger.info("Cancelled all open orders")
             return True
         except Exception as e:
             logger.error(f"Cancel all orders failed: {e}")
+            await self.reinit_signer()
             return False
 
     async def cancel_order(self, market_index: int, order_id: str) -> bool:
@@ -223,10 +269,14 @@ class LighterClient:
             )
             if error is not None:
                 logger.error(f"Cancel rejected: {error} | resp={resp}")
+                if self._is_sign_error(str(error)):
+                    await self.reinit_signer()
                 return False
             return True
         except Exception as e:
             logger.error(f"Cancel failed: {e}")
+            if self._is_sign_error(str(e)):
+                await self.reinit_signer()
             return False
 
     async def get_balance(self) -> float:
