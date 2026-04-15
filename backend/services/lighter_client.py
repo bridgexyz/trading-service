@@ -198,11 +198,9 @@ class LighterClient:
             return True
 
         try:
-            import time as _time
-            timestamp_ms = int(_time.time() * 1000)
             _result, resp, error = await self._signer_client.cancel_all_orders(
-                time_in_force=0,  # IMMEDIATE
-                timestamp_ms=timestamp_ms,
+                time_in_force=0,   # CANCEL_ALL_TIF_IMMEDIATE
+                timestamp_ms=0,    # must be 0 for IMMEDIATE; only set for SCHEDULED
             )
             if error is not None:
                 logger.error(f"Cancel all orders failed: {error}")
