@@ -3,6 +3,7 @@
 Wraps the lighter-sdk async API for pair trading operations.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -39,6 +40,9 @@ class LighterClient:
         self._signer_client = None
         self._mock_mode = False
         self._market_meta: dict[int, dict] = {}  # market_index → {price_decimals, size_decimals}
+        self._sign_lock = asyncio.Lock()
+        self._last_sign_ts: float = 0.0
+        self.min_sign_interval: float = 1.1  # 60 req/min rate limit → ~1s between signed txs
 
     async def _ensure_clients(self):
         """Lazily initialize Lighter SDK clients."""
@@ -62,6 +66,13 @@ class LighterClient:
         except Exception as e:
             logger.error(f"Failed to initialize Lighter clients: {e}")
             raise
+
+    async def _throttle(self):
+        """Enforce minimum interval between signed transactions (call while holding _sign_lock)."""
+        elapsed = time.time() - self._last_sign_ts
+        if elapsed < self.min_sign_interval:
+            await asyncio.sleep(self.min_sign_interval - elapsed)
+        self._last_sign_ts = time.time()
 
     async def reinit_signer(self):
         """Rebuild the signer client. Use after a failed signed tx to avoid
@@ -181,34 +192,36 @@ class LighterClient:
                 f"amount={base_amount} → {amount_int} ({meta['size_decimals']}dp)"
             )
 
-            if market:
-                order, resp, error = await self._signer_client.create_order(
-                    market_index=market_index,
-                    client_order_index=client_order_index,
-                    base_amount=amount_int,
-                    price=price_int,
-                    is_ask=is_ask,
-                    order_type=1,       # MARKET
-                    time_in_force=0,    # IMMEDIATE_OR_CANCEL
-                    order_expiry=0,     # SDK DEFAULT_IOC_EXPIRY
-                    reduce_only=reduce_only,
-                )
-            else:
-                order, resp, error = await self._signer_client.create_order(
-                    market_index=market_index,
-                    client_order_index=client_order_index,
-                    base_amount=amount_int,
-                    price=price_int,
-                    is_ask=is_ask,
-                    order_type=0,       # LIMIT
-                    time_in_force=1,    # GOOD_TILL_TIME
-                    reduce_only=reduce_only,
-                )
-            if error is not None:
-                logger.error(f"Order rejected: {error}")
-                if self._is_sign_error(str(error)):
-                    await self.reinit_signer()
-                return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
+            async with self._sign_lock:
+                await self._throttle()
+                if market:
+                    order, resp, error = await self._signer_client.create_order(
+                        market_index=market_index,
+                        client_order_index=client_order_index,
+                        base_amount=amount_int,
+                        price=price_int,
+                        is_ask=is_ask,
+                        order_type=1,       # MARKET
+                        time_in_force=0,    # IMMEDIATE_OR_CANCEL
+                        order_expiry=0,     # SDK DEFAULT_IOC_EXPIRY
+                        reduce_only=reduce_only,
+                    )
+                else:
+                    order, resp, error = await self._signer_client.create_order(
+                        market_index=market_index,
+                        client_order_index=client_order_index,
+                        base_amount=amount_int,
+                        price=price_int,
+                        is_ask=is_ask,
+                        order_type=0,       # LIMIT
+                        time_in_force=1,    # GOOD_TILL_TIME
+                        reduce_only=reduce_only,
+                    )
+                if error is not None:
+                    logger.error(f"Order rejected: {error}")
+                    if self._is_sign_error(str(error)):
+                        await self.reinit_signer()
+                    return OrderResult(success=False, error=str(error), raw_response=str(resp) if resp else None)
             order_id = str(client_order_index)
             # avg_execution_price is the actual fill; order.price is the limit/worst we submitted
             raw_price = getattr(order, "avg_execution_price", None) or getattr(order, "price", None)
@@ -229,7 +242,8 @@ class LighterClient:
         except Exception as e:
             logger.error(f"Order failed: {e}")
             if self._is_sign_error(str(e)):
-                await self.reinit_signer()
+                async with self._sign_lock:
+                    await self.reinit_signer()
             return OrderResult(success=False, error=str(e))
 
     async def cancel_all_orders(self) -> bool:
@@ -240,21 +254,22 @@ class LighterClient:
             return True
 
         try:
-            _result, resp, error = await self._signer_client.cancel_all_orders(
-                time_in_force=0,   # CANCEL_ALL_TIF_IMMEDIATE
-                timestamp_ms=0,    # must be 0 for IMMEDIATE; only set for SCHEDULED
-            )
-            if error is not None:
-                logger.error(f"Cancel all orders failed: {error}")
-                # Any failure of a signed tx can leave nonce desynced — always
-                # reinit here so subsequent calls on this instance are safe.
-                await self.reinit_signer()
-                return False
+            async with self._sign_lock:
+                await self._throttle()
+                _result, resp, error = await self._signer_client.cancel_all_orders(
+                    time_in_force=0,   # CANCEL_ALL_TIF_IMMEDIATE
+                    timestamp_ms=0,    # must be 0 for IMMEDIATE; only set for SCHEDULED
+                )
+                if error is not None:
+                    logger.error(f"Cancel all orders failed: {error}")
+                    await self.reinit_signer()
+                    return False
             logger.info("Cancelled all open orders")
             return True
         except Exception as e:
             logger.error(f"Cancel all orders failed: {e}")
-            await self.reinit_signer()
+            async with self._sign_lock:
+                await self.reinit_signer()
             return False
 
     async def cancel_order(self, market_index: int, order_id: str) -> bool:
@@ -264,19 +279,22 @@ class LighterClient:
             logger.info(f"MOCK cancel: market={market_index}, order={order_id}")
             return True
         try:
-            _cancel, resp, error = await self._signer_client.cancel_order(
-                market_index=market_index, order_index=int(order_id)
-            )
-            if error is not None:
-                logger.error(f"Cancel rejected: {error} | resp={resp}")
-                if self._is_sign_error(str(error)):
-                    await self.reinit_signer()
-                return False
+            async with self._sign_lock:
+                await self._throttle()
+                _cancel, resp, error = await self._signer_client.cancel_order(
+                    market_index=market_index, order_index=int(order_id)
+                )
+                if error is not None:
+                    logger.error(f"Cancel rejected: {error} | resp={resp}")
+                    if self._is_sign_error(str(error)):
+                        await self.reinit_signer()
+                    return False
             return True
         except Exception as e:
             logger.error(f"Cancel failed: {e}")
-            if self._is_sign_error(str(e)):
-                await self.reinit_signer()
+            async with self._sign_lock:
+                if self._is_sign_error(str(e)):
+                    await self.reinit_signer()
             return False
 
     async def get_balance(self) -> float:

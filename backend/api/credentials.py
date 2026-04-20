@@ -8,6 +8,7 @@ from backend.models.credential import Credential
 from backend.schemas.credential import CredentialCreate, CredentialUpdate, CredentialRead
 from backend.services.encryption import encrypt, decrypt
 from backend.api.deps import get_current_user
+from backend.engine.pair_job import invalidate_lighter_client
 
 router = APIRouter(prefix="/api/credentials", tags=["credentials"], dependencies=[Depends(get_current_user)])
 
@@ -65,6 +66,7 @@ def update_credential(
     session.add(cred)
     session.commit()
     session.refresh(cred)
+    invalidate_lighter_client(cred.id)
     return cred
 
 
@@ -75,6 +77,7 @@ def delete_credential(cred_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Credential not found")
     session.delete(cred)
     session.commit()
+    invalidate_lighter_client(cred_id)
 
 
 @router.post("/{cred_id}/test")

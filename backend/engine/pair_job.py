@@ -1030,8 +1030,20 @@ async def _rollback_partial_fill(
             )
 
 
+_lighter_client_cache: dict[int, "LighterClient"] = {}
+
+
+def invalidate_lighter_client(credential_id: int):
+    """Remove a cached client when credential is updated or deleted."""
+    _lighter_client_cache.pop(credential_id, None)
+
+
 async def _get_lighter_client(credential_id: int | None = None):
-    """Get a LighterClient for a specific or the first active credential."""
+    """Get a shared LighterClient for a credential (singleton per credential_id).
+
+    Sharing one client ensures the signing lock serializes orders across
+    concurrent pair jobs that use the same account, preventing nonce races.
+    """
     from backend.services.lighter_client import LighterClient
 
     with Session(engine) as session:
@@ -1044,13 +1056,18 @@ async def _get_lighter_client(credential_id: int | None = None):
         if not cred:
             return None
 
+        if cred.id in _lighter_client_cache:
+            return _lighter_client_cache[cred.id]
+
         pk = decrypt(cred.private_key_encrypted)
-        return LighterClient(
+        client = LighterClient(
             host=cred.lighter_host,
             private_key=pk,
             api_key_index=cred.api_key_index,
             account_index=cred.account_index,
         )
+        _lighter_client_cache[cred.id] = client
+        return client
 
 
 def _build_order_results(result_a, result_b) -> dict:
