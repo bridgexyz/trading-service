@@ -459,10 +459,7 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                    close_a=close_a, close_b=close_b)
         return
 
-    try:
-        balance = await lighter_client.get_balance()
-    finally:
-        await lighter_client.close()
+    balance = await lighter_client.get_balance()
 
     position_size = balance * (pair.position_size_pct / 100.0)
     if position_size <= 0:
@@ -516,158 +513,154 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
                    close_a=close_a, close_b=close_b)
         return
 
-    try:
-        # For long spread: buy A, sell B. For short spread: sell A, buy B.
-        is_ask_a = entry.direction == -1  # short spread = sell A
-        is_ask_b = entry.direction == 1   # long spread = sell B
+    # For long spread: buy A, sell B. For short spread: sell A, buy B.
+    is_ask_a = entry.direction == -1  # short spread = sell A
+    is_ask_b = entry.direction == 1   # long spread = sell B
 
-        size_a = abs(units)
-        size_b = abs(units * signals.hedge_ratio)
+    size_a = abs(units)
+    size_b = abs(units * signals.hedge_ratio)
 
-        order_mode = getattr(pair, "order_mode", "market")
+    order_mode = getattr(pair, "order_mode", "market")
 
-        if order_mode == "sliced":
-            result_a, result_b, completed_chunks = await _execute_sliced_orders(
-                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
+    if order_mode == "sliced":
+        result_a, result_b, completed_chunks = await _execute_sliced_orders(
+            lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
+        )
+        if completed_chunks == 0:
+            _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                       message="Sliced entry: 0 chunks completed",
+                       close_a=close_a, close_b=close_b)
+            return
+        if completed_chunks < pair.slice_chunks:
+            entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
+            logger.warning(
+                f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks, "
+                f"notional reduced to ${entry.notional:.0f}"
             )
-            if completed_chunks == 0:
-                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
-                           message="Sliced entry: 0 chunks completed",
-                           close_a=close_a, close_b=close_b)
-                return
-            if completed_chunks < pair.slice_chunks:
-                entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
-                logger.warning(
-                    f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks, "
-                    f"notional reduced to ${entry.notional:.0f}"
-                )
-                _notify(
-                    f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks. "
-                    f"Notional: ${entry.notional:.0f}"
-                )
-        elif order_mode == "limit":
-            result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
-                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
+            _notify(
+                f"[{pair.name}] Partial sliced entry: {completed_chunks}/{pair.slice_chunks} chunks. "
+                f"Notional: ${entry.notional:.0f}"
             )
-            if completed_chunks == 0 or result_a is None or result_b is None:
-                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
-                           message="Limit entry: no paired position established",
-                           close_a=close_a, close_b=close_b)
-                return
-            if completed_chunks < pair.slice_chunks:
-                entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
-                logger.warning(
-                    f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks, "
-                    f"notional reduced to ${entry.notional:.0f}"
-                )
-                _notify(
-                    f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks. "
-                    f"Notional: ${entry.notional:.0f}"
-                )
-        else:
-            # Worst price with slippage tolerance for IOC market orders
-            SLIPPAGE = 0.01
-            worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
-            worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
-
-            result_a = await _place_pair_order(
-                lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a
+    elif order_mode == "limit":
+        result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
+            lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b
+        )
+        if completed_chunks == 0 or result_a is None or result_b is None:
+            _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                       message="Limit entry: no paired position established",
+                       close_a=close_a, close_b=close_b)
+            return
+        if completed_chunks < pair.slice_chunks:
+            entry.notional = entry.notional * (completed_chunks / pair.slice_chunks)
+            logger.warning(
+                f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks, "
+                f"notional reduced to ${entry.notional:.0f}"
             )
-            result_b = await _place_pair_order(
-                lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b
+            _notify(
+                f"[{pair.name}] Partial limit entry: {completed_chunks}/{pair.slice_chunks} chunks. "
+                f"Notional: ${entry.notional:.0f}"
             )
+    else:
+        # Worst price with slippage tolerance for IOC market orders
+        SLIPPAGE = 0.01
+        worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
+        worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
 
-            if not result_a.success or not result_b.success:
-                err = result_a.error or result_b.error
-                # Cancel the successful leg to avoid orphaned single-sided position
-                await _rollback_partial_fill(
-                    lighter_client, pair, result_a, result_b, "entry", signals
-                )
-                _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
-                            message=f"Order failed (rolled back): {err}",
-                            close_a=close_a, close_b=close_b)
-                return
+        result_a = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a
+        )
+        result_b = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b
+        )
 
-        # Verify positions actually exist on the exchange
-        # (skip for limit — already verified inside _execute_limit_sliced_orders)
-        if order_mode in ("market", "sliced"):
-            settle_delay = 2 if order_mode == "sliced" else 1
-            await asyncio.sleep(settle_delay)
-
-            exchange_positions = await lighter_client.get_positions()
-            exchange_by_market = {p["market_index"]: p for p in exchange_positions}
-
-            has_leg_a = pair.lighter_market_a in exchange_by_market
-            has_leg_b = pair.lighter_market_b in exchange_by_market
-
-            if not has_leg_a or not has_leg_b:
-                missing = []
-                if not has_leg_a:
-                    missing.append(f"leg A (market {pair.lighter_market_a})")
-                if not has_leg_b:
-                    missing.append(f"leg B (market {pair.lighter_market_b})")
-                _log_cycle(pair.id, "error", signals=signals, action="entry_not_confirmed",
-                           message=f"Orders accepted but positions not found on exchange: {', '.join(missing)}",
-                           close_a=close_a, close_b=close_b, market_data=market_data)
-                _notify(f"[{pair.name}] Entry orders accepted but NOT confirmed on exchange. Positions missing: {', '.join(missing)}")
-                return
-
-            # Use exchange avg_entry_price as the true fill price
-            exchange_fill_a = exchange_by_market[pair.lighter_market_a]["entry_price"]
-            exchange_fill_b = exchange_by_market[pair.lighter_market_b]["entry_price"]
-            logger.info(f"[{pair.name}] Exchange entry prices: A={exchange_fill_a}, B={exchange_fill_b}")
-
-        # Save open position (re-check to prevent duplicates from race conditions)
-        with Session(engine) as session:
-            existing = session.exec(
-                select(OpenPosition).where(OpenPosition.pair_id == pair.id)
-            ).first()
-            if existing:
-                logger.warning(f"[{pair.name}] Position already exists, aborting entry")
-                _log_cycle(pair.id, "skipped", signals=signals, action="entry_aborted_duplicate",
-                           message="Position already existed at commit time",
-                           close_a=close_a, close_b=close_b)
-                return
-            pos = OpenPosition(
-                pair_id=pair.id,
-                direction=entry.direction,
-                entry_z=signals.z_score,
-                entry_spread=signals.current_spread,
-                entry_price_a=current_price_a,
-                entry_price_b=current_price_b,
-                entry_hedge_ratio=signals.hedge_ratio,
-                entry_notional=entry.notional,
-                lighter_order_id_a=result_a.order_id,
-                lighter_order_id_b=result_b.order_id,
-                fill_price_a=exchange_fill_a if order_mode in ("market", "sliced") else result_a.filled_price,
-                fill_price_b=exchange_fill_b if order_mode in ("market", "sliced") else result_b.filled_price,  # limit mode sets filled_price from exchange
-                fill_amount_a=result_a.filled_amount,
-                fill_amount_b=result_b.filled_amount,
+        if not result_a.success or not result_b.success:
+            err = result_a.error or result_b.error
+            # Cancel the successful leg to avoid orphaned single-sided position
+            await _rollback_partial_fill(
+                lighter_client, pair, result_a, result_b, "entry", signals
             )
-            session.add(pos)
-            # Clear cooldown on successful entry
-            db_pair = session.get(TradingPair, pair.id)
-            if db_pair.cooldown_until is not None:
-                db_pair.cooldown_until = None
-                session.add(db_pair)
-            session.commit()
+            _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
+                        message=f"Order failed (rolled back): {err}",
+                        close_a=close_a, close_b=close_b)
+            return
 
-        direction_str = "entry_long" if entry.direction == 1 else "entry_short"
-        logger.info(f"[{pair.name}] Entered {direction_str} at z={signals.z_score:.3f}")
-        _notify(f"[{pair.name}] Entry {direction_str} | z={signals.z_score:.3f} | ${entry.notional:.0f}")
-        _log_cycle(pair.id, "success", signals=signals, action=direction_str,
-                    message=f"Notional: ${entry.notional:.0f}",
-                    close_a=close_a, close_b=close_b, market_data=market_data,
-                    order_results=_build_order_results(result_a, result_b))
+    # Verify positions actually exist on the exchange
+    # (skip for limit — already verified inside _execute_limit_sliced_orders)
+    if order_mode in ("market", "sliced"):
+        settle_delay = 2 if order_mode == "sliced" else 1
+        await asyncio.sleep(settle_delay)
 
-        # Reschedule to exit interval if separate exit schedule is enabled
-        if pair.use_exit_schedule and pair.exit_schedule_interval:
-            from backend.engine.scheduler import reschedule_pair_job
-            reschedule_pair_job(pair.id, pair.exit_schedule_interval)
-            logger.info(f"[{pair.name}] Rescheduled to exit interval: {pair.exit_schedule_interval}")
+        exchange_positions = await lighter_client.get_positions()
+        exchange_by_market = {p["market_index"]: p for p in exchange_positions}
 
-    finally:
-        await lighter_client.close()
+        has_leg_a = pair.lighter_market_a in exchange_by_market
+        has_leg_b = pair.lighter_market_b in exchange_by_market
+
+        if not has_leg_a or not has_leg_b:
+            missing = []
+            if not has_leg_a:
+                missing.append(f"leg A (market {pair.lighter_market_a})")
+            if not has_leg_b:
+                missing.append(f"leg B (market {pair.lighter_market_b})")
+            _log_cycle(pair.id, "error", signals=signals, action="entry_not_confirmed",
+                       message=f"Orders accepted but positions not found on exchange: {', '.join(missing)}",
+                       close_a=close_a, close_b=close_b, market_data=market_data)
+            _notify(f"[{pair.name}] Entry orders accepted but NOT confirmed on exchange. Positions missing: {', '.join(missing)}")
+            return
+
+        # Use exchange avg_entry_price as the true fill price
+        exchange_fill_a = exchange_by_market[pair.lighter_market_a]["entry_price"]
+        exchange_fill_b = exchange_by_market[pair.lighter_market_b]["entry_price"]
+        logger.info(f"[{pair.name}] Exchange entry prices: A={exchange_fill_a}, B={exchange_fill_b}")
+
+    # Save open position (re-check to prevent duplicates from race conditions)
+    with Session(engine) as session:
+        existing = session.exec(
+            select(OpenPosition).where(OpenPosition.pair_id == pair.id)
+        ).first()
+        if existing:
+            logger.warning(f"[{pair.name}] Position already exists, aborting entry")
+            _log_cycle(pair.id, "skipped", signals=signals, action="entry_aborted_duplicate",
+                       message="Position already existed at commit time",
+                       close_a=close_a, close_b=close_b)
+            return
+        pos = OpenPosition(
+            pair_id=pair.id,
+            direction=entry.direction,
+            entry_z=signals.z_score,
+            entry_spread=signals.current_spread,
+            entry_price_a=current_price_a,
+            entry_price_b=current_price_b,
+            entry_hedge_ratio=signals.hedge_ratio,
+            entry_notional=entry.notional,
+            lighter_order_id_a=result_a.order_id,
+            lighter_order_id_b=result_b.order_id,
+            fill_price_a=exchange_fill_a if order_mode in ("market", "sliced") else result_a.filled_price,
+            fill_price_b=exchange_fill_b if order_mode in ("market", "sliced") else result_b.filled_price,  # limit mode sets filled_price from exchange
+            fill_amount_a=result_a.filled_amount,
+            fill_amount_b=result_b.filled_amount,
+        )
+        session.add(pos)
+        # Clear cooldown on successful entry
+        db_pair = session.get(TradingPair, pair.id)
+        if db_pair.cooldown_until is not None:
+            db_pair.cooldown_until = None
+            session.add(db_pair)
+        session.commit()
+
+    direction_str = "entry_long" if entry.direction == 1 else "entry_short"
+    logger.info(f"[{pair.name}] Entered {direction_str} at z={signals.z_score:.3f}")
+    _notify(f"[{pair.name}] Entry {direction_str} | z={signals.z_score:.3f} | ${entry.notional:.0f}")
+    _log_cycle(pair.id, "success", signals=signals, action=direction_str,
+                message=f"Notional: ${entry.notional:.0f}",
+                close_a=close_a, close_b=close_b, market_data=market_data,
+                order_results=_build_order_results(result_a, result_b))
+
+    # Reschedule to exit interval if separate exit schedule is enabled
+    if pair.use_exit_schedule and pair.exit_schedule_interval:
+        from backend.engine.scheduler import reschedule_pair_job
+        reschedule_pair_job(pair.id, pair.exit_schedule_interval)
+        logger.info(f"[{pair.name}] Rescheduled to exit interval: {pair.exit_schedule_interval}")
 
 
 async def _handle_exit(pair: TradingPair, position: OpenPosition, signals, prices_a, prices_b, close_a: float, close_b: float, market_data: dict | None = None):
@@ -737,247 +730,243 @@ async def execute_exit(
                    close_a=close_a, close_b=close_b)
         return
 
-    try:
-        # Calculate fallback sizes from entry notional
-        dollar_per_unit = position.entry_price_a + abs(position.entry_hedge_ratio) * position.entry_price_b
-        units = position.entry_notional / dollar_per_unit if dollar_per_unit > 0 else 0
-        fallback_size_a = abs(units)
-        fallback_size_b = abs(units * position.entry_hedge_ratio)
+    # Calculate fallback sizes from entry notional
+    dollar_per_unit = position.entry_price_a + abs(position.entry_hedge_ratio) * position.entry_price_b
+    units = position.entry_notional / dollar_per_unit if dollar_per_unit > 0 else 0
+    fallback_size_a = abs(units)
+    fallback_size_b = abs(units * position.entry_hedge_ratio)
 
-        # 1. Cancel all unfilled entry orders
-        logger.info(f"[{pair.name}] Cancelling open orders before exit")
-        await lighter_client.cancel_all_orders()
-        await asyncio.sleep(2)
+    # 1. Cancel all unfilled entry orders
+    logger.info(f"[{pair.name}] Cancelling open orders before exit")
+    await lighter_client.cancel_all_orders()
+    await asyncio.sleep(2)
 
-        # Snapshot realized PnL before exit (for delta calculation)
-        pnl_before = await lighter_client.get_realized_pnl(
-            [pair.lighter_market_a, pair.lighter_market_b]
+    # Snapshot realized PnL before exit (for delta calculation)
+    pnl_before = await lighter_client.get_realized_pnl(
+        [pair.lighter_market_a, pair.lighter_market_b]
+    )
+
+    # 2. Get actual open position sizes from exchange
+    exchange_positions = await lighter_client.get_positions()
+    exchange_by_market = {p["market_index"]: p for p in exchange_positions}
+
+    pos_a = exchange_by_market.get(pair.lighter_market_a)
+    pos_b = exchange_by_market.get(pair.lighter_market_b)
+    size_a = pos_a["size"] if pos_a else fallback_size_a
+    size_b = pos_b["size"] if pos_b else fallback_size_b
+
+    if pos_a:
+        logger.info(f"[{pair.name}] Exit leg A: exchange size {size_a:.6f}")
+    else:
+        logger.warning(f"[{pair.name}] Exit leg A: no exchange position, using calculated size {size_a:.6f}")
+    if pos_b:
+        logger.info(f"[{pair.name}] Exit leg B: exchange size {size_b:.6f}")
+    else:
+        logger.warning(f"[{pair.name}] Exit leg B: no exchange position, using calculated size {size_b:.6f}")
+
+    # Reverse directions for close
+    is_ask_a = position.direction == 1   # was buy A, now sell A
+    is_ask_b = position.direction == -1  # was sell B, now buy B
+
+    order_mode = getattr(pair, "order_mode", "market")
+
+    if order_mode == "sliced":
+        result_a, result_b, completed_chunks = await _execute_sliced_orders(
+            lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
         )
-
-        # 2. Get actual open position sizes from exchange
-        exchange_positions = await lighter_client.get_positions()
-        exchange_by_market = {p["market_index"]: p for p in exchange_positions}
-
-        pos_a = exchange_by_market.get(pair.lighter_market_a)
-        pos_b = exchange_by_market.get(pair.lighter_market_b)
-        size_a = pos_a["size"] if pos_a else fallback_size_a
-        size_b = pos_b["size"] if pos_b else fallback_size_b
-
-        if pos_a:
-            logger.info(f"[{pair.name}] Exit leg A: exchange size {size_a:.6f}")
-        else:
-            logger.warning(f"[{pair.name}] Exit leg A: no exchange position, using calculated size {size_a:.6f}")
-        if pos_b:
-            logger.info(f"[{pair.name}] Exit leg B: exchange size {size_b:.6f}")
-        else:
-            logger.warning(f"[{pair.name}] Exit leg B: no exchange position, using calculated size {size_b:.6f}")
-
-        # Reverse directions for close
-        is_ask_a = position.direction == 1   # was buy A, now sell A
-        is_ask_b = position.direction == -1  # was sell B, now buy B
-
-        order_mode = getattr(pair, "order_mode", "market")
-
-        if order_mode == "sliced":
-            result_a, result_b, completed_chunks = await _execute_sliced_orders(
-                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
-            )
-            if completed_chunks == 0:
-                _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
-                           message="Sliced exit: 0 chunks completed",
-                           close_a=close_a, close_b=close_b)
-                return
-            if completed_chunks < pair.slice_chunks:
-                logger.warning(
-                    f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks"
-                )
-                _notify(
-                    f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks. "
-                    f"Remaining position will be closed next cycle."
-                )
-                _log_cycle(pair.id, "error", signals=signals, action="exit_partial",
-                           message=f"Sliced exit partial: {completed_chunks}/{pair.slice_chunks} chunks",
-                           close_a=close_a, close_b=close_b)
-                return
-        elif order_mode == "limit":
-            result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
-                lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
-            )
-            if completed_chunks == 0:
-                _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
-                           message="Limit exit: 0 chunks placed",
-                           close_a=close_a, close_b=close_b)
-                return
-        else:
-            # Worst price with slippage tolerance
-            SLIPPAGE = 0.01
-            worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
-            worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
-
-            # Place exit orders based on order_mode with reduce_only
-            result_a = await _place_pair_order(
-                lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
-            )
-            result_b = await _place_pair_order(
-                lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
-            )
-
-            if not result_a.success or not result_b.success:
-                err = result_a.error or result_b.error
-                await _rollback_partial_fill(
-                    lighter_client, pair, result_a, result_b, "exit", signals
-                )
-                _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
-                            message=f"Close order failed (rolled back): {err}",
-                            close_a=close_a, close_b=close_b)
-                return
-
-        # Verify positions are actually closed on the exchange (with retries)
-        # (skip for limit — already verified inside _execute_limit_sliced_orders)
-        if order_mode in ("market", "sliced"):
-            settle_delays = [3, 6, 10] if order_mode == "market" else [3, 6, 15]
-            positions_closed = False
-            has_leg_a = False
-            has_leg_b = False
-
-            for attempt, delay in enumerate(settle_delays, 1):
-                await asyncio.sleep(delay)
-                exchange_positions = await lighter_client.get_positions()
-                exchange_markets = {p["market_index"] for p in exchange_positions}
-
-                has_leg_a = pair.lighter_market_a in exchange_markets
-                has_leg_b = pair.lighter_market_b in exchange_markets
-
-                if not has_leg_a and not has_leg_b:
-                    positions_closed = True
-                    break
-
-                if attempt < len(settle_delays):
-                    logger.info(
-                        f"[{pair.name}] Exit verification attempt {attempt}/{len(settle_delays)}: "
-                        f"positions still open, retrying..."
-                    )
-
-            if not positions_closed:
-                still_open = []
-                if has_leg_a:
-                    still_open.append(f"leg A (market {pair.lighter_market_a})")
-                if has_leg_b:
-                    still_open.append(f"leg B (market {pair.lighter_market_b})")
-                _log_cycle(pair.id, "error", signals=signals, action="exit_not_confirmed",
-                           message=f"Exit orders accepted but positions still open after {len(settle_delays)} checks: {', '.join(still_open)}",
-                           close_a=close_a, close_b=close_b)
-                return
-
-        # Wait for exchange to settle realized PnL (sliced orders need time)
-        if order_mode == "sliced":
-            await asyncio.sleep(5)
-
-        # Compute PnL from exchange realized PnL delta
-        pnl_after = await lighter_client.get_realized_pnl(
-            [pair.lighter_market_a, pair.lighter_market_b]
-        )
-        pnl_delta_a = pnl_after[pair.lighter_market_a] - pnl_before[pair.lighter_market_a]
-        pnl_delta_b = pnl_after[pair.lighter_market_b] - pnl_before[pair.lighter_market_b]
-        pnl = pnl_delta_a + pnl_delta_b
-        logger.info(
-            f"[{pair.name}] Exchange realized PnL delta: "
-            f"A={pnl_delta_a:.2f}, B={pnl_delta_b:.2f}, total={pnl:.2f}"
-        )
-
-        # Fallback to price-based PnL if exchange delta is 0 (not yet settled)
-        entry_pa = position.entry_price_a
-        entry_pb = position.entry_price_b
-        exit_pa = current_price_a
-        exit_pb = current_price_b
-
-        if pnl == 0:
-            if exit_reason == "stop_loss":
-                pnl = -pair.stop_loss_pct / 100 * entry_equity
-            else:
-                pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
-                pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
-                pnl = pnl_a + pnl_b
+        if completed_chunks == 0:
+            _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                       message="Sliced exit: 0 chunks completed",
+                       close_a=close_a, close_b=close_b)
+            return
+        if completed_chunks < pair.slice_chunks:
             logger.warning(
-                f"[{pair.name}] Exchange PnL delta was 0, using price-based fallback: ${pnl:.2f}"
+                f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks"
             )
-
-        pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
-
-        # Compute duration in candles from entry_time
-        from backend.utils.constants import INTERVAL_HOURS
-        et = position.entry_time if position.entry_time.tzinfo else position.entry_time.replace(tzinfo=timezone.utc)
-        elapsed = (datetime.now(timezone.utc) - et).total_seconds()
-        interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
-        duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
-
-        direction_str = "Long A / Short B" if position.direction == 1 else "Short A / Long B"
-
-        with Session(engine) as session:
-            # Save trade record
-            trade = Trade(
-                pair_id=pair.id,
-                direction=direction_str,
-                entry_time=position.entry_time,
-                exit_time=datetime.now(timezone.utc),
-                entry_price_a=entry_pa,
-                exit_price_a=exit_pa,
-                entry_price_b=entry_pb,
-                exit_price_b=exit_pb,
-                size_a=round(size_a, 4),
-                size_b=round(size_b, 4),
-                hedge_ratio=position.entry_hedge_ratio,
-                pnl=round(pnl, 2),
-                pnl_pct=round(pnl_pct, 2),
-                exit_reason=exit_reason or "unknown",
-                duration_candles=duration,
+            _notify(
+                f"[{pair.name}] Partial sliced exit: {completed_chunks}/{pair.slice_chunks} chunks. "
+                f"Remaining position will be closed next cycle."
             )
-            session.add(trade)
+            _log_cycle(pair.id, "error", signals=signals, action="exit_partial",
+                       message=f"Sliced exit partial: {completed_chunks}/{pair.slice_chunks} chunks",
+                       close_a=close_a, close_b=close_b)
+            return
+    elif order_mode == "limit":
+        result_a, result_b, completed_chunks = await _execute_limit_sliced_orders(
+            lighter_client, pair, size_a, size_b, is_ask_a, is_ask_b, reduce_only=True
+        )
+        if completed_chunks == 0:
+            _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                       message="Limit exit: 0 chunks placed",
+                       close_a=close_a, close_b=close_b)
+            return
+    else:
+        # Worst price with slippage tolerance
+        SLIPPAGE = 0.01
+        worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
+        worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
 
-            # Update pair equity
-            db_pair = session.get(TradingPair, pair.id)
-            db_pair.current_equity += pnl
-            db_pair.updated_at = datetime.now(timezone.utc)
-            session.add(db_pair)
+        # Place exit orders based on order_mode with reduce_only
+        result_a = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
+        )
+        result_b = await _place_pair_order(
+            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
+        )
 
-            # Save equity snapshot with drawdown from peak
-            from sqlalchemy import func
-            peak_equity = session.exec(
-                select(func.max(EquitySnapshot.equity))
-                .where(EquitySnapshot.pair_id == pair.id)
-            ).one_or_none() or db_pair.current_equity
-            new_equity = round(db_pair.current_equity, 2)
-            dd_pct = round((new_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
-
-            snapshot = EquitySnapshot(
-                pair_id=pair.id,
-                equity=new_equity,
-                drawdown_pct=min(dd_pct, 0.0),
+        if not result_a.success or not result_b.success:
+            err = result_a.error or result_b.error
+            await _rollback_partial_fill(
+                lighter_client, pair, result_a, result_b, "exit", signals
             )
-            session.add(snapshot)
+            _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
+                        message=f"Close order failed (rolled back): {err}",
+                        close_a=close_a, close_b=close_b)
+            return
 
-            # Delete open position
-            db_pos = session.get(OpenPosition, position.id)
-            if db_pos:
-                session.delete(db_pos)
+    # Verify positions are actually closed on the exchange (with retries)
+    # (skip for limit — already verified inside _execute_limit_sliced_orders)
+    if order_mode in ("market", "sliced"):
+        settle_delays = [3, 6, 10] if order_mode == "market" else [3, 6, 15]
+        positions_closed = False
+        has_leg_a = False
+        has_leg_b = False
 
-            session.commit()
+        for attempt, delay in enumerate(settle_delays, 1):
+            await asyncio.sleep(delay)
+            exchange_positions = await lighter_client.get_positions()
+            exchange_markets = {p["market_index"] for p in exchange_positions}
 
-        logger.info(f"[{pair.name}] Exited ({exit_reason}): PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
-        _notify(f"[{pair.name}] Exit ({exit_reason}) | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
-        _log_cycle(pair.id, "success", signals=signals, action=f"exit:{exit_reason}",
-                    message=f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)",
-                    close_a=close_a, close_b=close_b, market_data=market_data,
-                    order_results=_build_order_results(result_a, result_b))
+            has_leg_a = pair.lighter_market_a in exchange_markets
+            has_leg_b = pair.lighter_market_b in exchange_markets
 
-        # Reschedule back to entry interval if separate exit schedule is enabled
-        if pair.use_exit_schedule:
-            from backend.engine.scheduler import reschedule_pair_job
-            reschedule_pair_job(pair.id, pair.schedule_interval)
-            logger.info(f"[{pair.name}] Rescheduled to entry interval: {pair.schedule_interval}")
+            if not has_leg_a and not has_leg_b:
+                positions_closed = True
+                break
 
-    finally:
-        await lighter_client.close()
+            if attempt < len(settle_delays):
+                logger.info(
+                    f"[{pair.name}] Exit verification attempt {attempt}/{len(settle_delays)}: "
+                    f"positions still open, retrying..."
+                )
+
+        if not positions_closed:
+            still_open = []
+            if has_leg_a:
+                still_open.append(f"leg A (market {pair.lighter_market_a})")
+            if has_leg_b:
+                still_open.append(f"leg B (market {pair.lighter_market_b})")
+            _log_cycle(pair.id, "error", signals=signals, action="exit_not_confirmed",
+                       message=f"Exit orders accepted but positions still open after {len(settle_delays)} checks: {', '.join(still_open)}",
+                       close_a=close_a, close_b=close_b)
+            return
+
+    # Wait for exchange to settle realized PnL (sliced orders need time)
+    if order_mode == "sliced":
+        await asyncio.sleep(5)
+
+    # Compute PnL from exchange realized PnL delta
+    pnl_after = await lighter_client.get_realized_pnl(
+        [pair.lighter_market_a, pair.lighter_market_b]
+    )
+    pnl_delta_a = pnl_after[pair.lighter_market_a] - pnl_before[pair.lighter_market_a]
+    pnl_delta_b = pnl_after[pair.lighter_market_b] - pnl_before[pair.lighter_market_b]
+    pnl = pnl_delta_a + pnl_delta_b
+    logger.info(
+        f"[{pair.name}] Exchange realized PnL delta: "
+        f"A={pnl_delta_a:.2f}, B={pnl_delta_b:.2f}, total={pnl:.2f}"
+    )
+
+    # Fallback to price-based PnL if exchange delta is 0 (not yet settled)
+    entry_pa = position.entry_price_a
+    entry_pb = position.entry_price_b
+    exit_pa = current_price_a
+    exit_pb = current_price_b
+
+    if pnl == 0:
+        if exit_reason == "stop_loss":
+            pnl = -pair.stop_loss_pct / 100 * entry_equity
+        else:
+            pnl_a = (exit_pa - entry_pa) * size_a * (1 if position.direction == 1 else -1)
+            pnl_b = (exit_pb - entry_pb) * size_b * (-1 if position.direction == 1 else 1)
+            pnl = pnl_a + pnl_b
+        logger.warning(
+            f"[{pair.name}] Exchange PnL delta was 0, using price-based fallback: ${pnl:.2f}"
+        )
+
+    pnl_pct = pnl / entry_equity * 100 if entry_equity > 0 else 0
+
+    # Compute duration in candles from entry_time
+    from backend.utils.constants import INTERVAL_HOURS
+    et = position.entry_time if position.entry_time.tzinfo else position.entry_time.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(timezone.utc) - et).total_seconds()
+    interval_sec = INTERVAL_HOURS.get(pair.window_interval, 1.0) * 3600
+    duration = int(elapsed / interval_sec) if interval_sec > 0 else 0
+
+    direction_str = "Long A / Short B" if position.direction == 1 else "Short A / Long B"
+
+    with Session(engine) as session:
+        # Save trade record
+        trade = Trade(
+            pair_id=pair.id,
+            direction=direction_str,
+            entry_time=position.entry_time,
+            exit_time=datetime.now(timezone.utc),
+            entry_price_a=entry_pa,
+            exit_price_a=exit_pa,
+            entry_price_b=entry_pb,
+            exit_price_b=exit_pb,
+            size_a=round(size_a, 4),
+            size_b=round(size_b, 4),
+            hedge_ratio=position.entry_hedge_ratio,
+            pnl=round(pnl, 2),
+            pnl_pct=round(pnl_pct, 2),
+            exit_reason=exit_reason or "unknown",
+            duration_candles=duration,
+        )
+        session.add(trade)
+
+        # Update pair equity
+        db_pair = session.get(TradingPair, pair.id)
+        db_pair.current_equity += pnl
+        db_pair.updated_at = datetime.now(timezone.utc)
+        session.add(db_pair)
+
+        # Save equity snapshot with drawdown from peak
+        from sqlalchemy import func
+        peak_equity = session.exec(
+            select(func.max(EquitySnapshot.equity))
+            .where(EquitySnapshot.pair_id == pair.id)
+        ).one_or_none() or db_pair.current_equity
+        new_equity = round(db_pair.current_equity, 2)
+        dd_pct = round((new_equity - peak_equity) / peak_equity * 100, 2) if peak_equity > 0 else 0.0
+
+        snapshot = EquitySnapshot(
+            pair_id=pair.id,
+            equity=new_equity,
+            drawdown_pct=min(dd_pct, 0.0),
+        )
+        session.add(snapshot)
+
+        # Delete open position
+        db_pos = session.get(OpenPosition, position.id)
+        if db_pos:
+            session.delete(db_pos)
+
+        session.commit()
+
+    logger.info(f"[{pair.name}] Exited ({exit_reason}): PnL=${pnl:.2f} ({pnl_pct:.2f}%)")
+    _notify(f"[{pair.name}] Exit ({exit_reason}) | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)")
+    _log_cycle(pair.id, "success", signals=signals, action=f"exit:{exit_reason}",
+                message=f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%)",
+                close_a=close_a, close_b=close_b, market_data=market_data,
+                order_results=_build_order_results(result_a, result_b))
+
+    # Reschedule back to entry interval if separate exit schedule is enabled
+    if pair.use_exit_schedule:
+        from backend.engine.scheduler import reschedule_pair_job
+        reschedule_pair_job(pair.id, pair.schedule_interval)
+        logger.info(f"[{pair.name}] Rescheduled to entry interval: {pair.schedule_interval}")
 
 
 async def _rollback_partial_fill(
