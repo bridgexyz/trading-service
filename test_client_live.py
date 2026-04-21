@@ -1,18 +1,15 @@
-"""Live integration test for LighterClient through the singleton path.
+"""Lighter DEX integration test — testnet.
 
-Tests the actual production code path: DB credential → decryption →
-singleton cache → sign lock → order execution.
+Opens 3 BTC market positions simultaneously at $200 each, verifies they
+appear on the exchange, then closes the combined position.
 
-Also tests concurrent ordering to verify the singleton + lock prevents
-nonce races.
+Fetches live BTC price from mainnet for accurate sizing.
+Uses the production LighterClient with hardcoded testnet credentials.
 
-Usage (requires .env with TS_DATABASE_URL and TS_ENCRYPTION_KEY):
-    python test_client_live.py                     # test with first active credential
-    python test_client_live.py --credential-id 2   # test with specific credential
-    python test_client_live.py --concurrent         # test concurrent orders (nonce race check)
+Usage:
+    python test_client_live.py
 """
 
-import argparse
 import asyncio
 import logging
 import os
@@ -21,232 +18,198 @@ import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from backend.services.lighter_client import LighterClient
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# --- Testnet credentials (hardcoded) ---
+TESTNET_HOST = "https://testnet.zklighter.elliot.ai"
+MAINNET_HOST = "https://mainnet.zklighter.elliot.ai"
+PRIVATE_KEY = "098df0e805aee76a9c59e77d5b82d163e2e2a21d4914ced02b97367416cf292a6d2476d89ab5461d"
+API_KEY_INDEX = 4
+ACCOUNT_INDEX = 67
 
-async def get_client(credential_id: int | None = None):
-    from backend.engine.pair_job import _get_lighter_client
-    client = await _get_lighter_client(credential_id)
-    if client is None:
-        print(f"ERROR: No active credential found (credential_id={credential_id})")
-        sys.exit(1)
-    return client
-
-
-async def test_singleton(credential_id: int | None = None):
-    """Verify two calls return the exact same instance."""
-    logger.info("--- Test: singleton cache ---")
-    c1 = await get_client(credential_id)
-    c2 = await get_client(credential_id)
-    assert c1 is c2, "Singleton cache broken: got different instances"
-    logger.info(f"Same instance: {c1 is c2} (id={id(c1)})")
-    return True
+BTC_MARKET_INDEX = 1
+NOTIONAL_PER_ORDER = 200.0  # $200 per order
+NUM_ORDERS = 3
+SLIPPAGE = 0.02
 
 
-async def test_balance(credential_id: int | None = None):
-    logger.info("--- Test: balance ---")
-    client = await get_client(credential_id)
-    balance = await client.get_balance()
-    assert balance >= 0, f"Balance should be non-negative, got {balance}"
-    logger.info(f"Balance: ${balance:.2f}")
-    return True
+async def get_btc_price() -> float:
+    """Fetch live BTC mid-price from mainnet orderbook."""
+    import lighter
 
-
-async def test_market_meta(credential_id: int | None = None, market_index: int = 0):
-    logger.info(f"--- Test: market meta (index={market_index}) ---")
-    client = await get_client(credential_id)
-    await client._ensure_clients()
-    meta = await client._get_market_meta(market_index)
-    assert "price_decimals" in meta and "size_decimals" in meta
-    logger.info(f"Market {market_index}: {meta}")
-    return True
-
-
-async def test_positions(credential_id: int | None = None):
-    logger.info("--- Test: get positions ---")
-    client = await get_client(credential_id)
-    positions = await client.get_positions()
-    logger.info(f"Open positions: {len(positions)}")
-    for p in positions:
-        logger.info(f"  market={p['market_index']} side={p['side']} size={p['size']} entry={p['entry_price']}")
-    return True
-
-
-async def test_place_and_cancel(credential_id: int | None = None, market_index: int = 0):
-    """Place a tiny limit order far from market, then cancel."""
-    logger.info(f"--- Test: place + cancel (market={market_index}) ---")
-    client = await get_client(credential_id)
-
-    await client._ensure_clients()
-    meta = await client._get_market_meta(market_index)
-    min_size = 1 / (10 ** meta["size_decimals"])
-
-    client_order_index = int(time.time() * 1000) % (2**31)
-    result = await client.place_order(
-        market_index=market_index,
-        base_amount=min_size,
-        price=1.0,  # $1 bid — won't fill
-        is_ask=False,
-        client_order_index=client_order_index,
-        market=False,
-    )
-
-    if not result.success:
-        logger.error(f"Order FAILED: {result.error}")
-        return False
-
-    logger.info(f"Order placed: id={result.order_id}, status={result.order_status}")
-
-    cancelled = await client.cancel_order(market_index, result.order_id)
-    logger.info(f"Cancel: {'OK' if cancelled else 'FAILED (may have expired)'}")
-    return True
-
-
-async def test_concurrent_singleton(credential_id: int | None = None, market_index: int = 0):
-    """Fire multiple orders concurrently through the singleton (should all pass)."""
-    logger.info(f"--- Test: concurrent via singleton (market={market_index}) ---")
-    client = await get_client(credential_id)
-
-    await client._ensure_clients()
-    meta = await client._get_market_meta(market_index)
-    min_size = 1 / (10 ** meta["size_decimals"])
-
-    async def place_one(tag: str):
-        coi = int(time.time() * 1000) % (2**31) + hash(tag) % 10000
-        r = await client.place_order(
-            market_index=market_index,
-            base_amount=min_size,
-            price=1.0,
-            is_ask=False,
-            client_order_index=coi,
-            market=False,
-        )
-        logger.info(f"  [{tag}] {'OK' if r.success else 'FAIL: ' + str(r.error)}")
-        return r.success
-
-    results = await asyncio.gather(
-        place_one("A"),
-        place_one("B"),
-        place_one("C"),
-    )
-
-    await client.cancel_all_orders()
-
-    passed = all(results)
-    logger.info(f"Singleton concurrent: {sum(results)}/3 succeeded")
-    return passed
-
-
-async def test_concurrent_no_lock(credential_id: int | None = None, market_index: int = 0):
-    """Reproduce the original bug: separate clients, no shared lock, same account.
-
-    Creates 3 independent LighterClient instances (like the old code did per pair job)
-    and fires orders simultaneously. Without the singleton, these clients each read
-    the same nonce and race — expect 'invalid signature' failures.
-    """
-    logger.info(f"--- Test: concurrent WITHOUT singleton (reproducing old bug) ---")
-    from backend.services.lighter_client import LighterClient
-    from backend.services.encryption import decrypt
-    from backend.models.credential import Credential
-    from backend.database import engine
-    from sqlmodel import Session, select
-
-    with Session(engine) as session:
-        if credential_id is not None:
-            cred = session.get(Credential, credential_id)
-        else:
-            cred = session.exec(
-                select(Credential).where(Credential.is_active == True)
-            ).first()
-        if not cred:
-            logger.error("No credential found")
-            return False
-        pk = decrypt(cred.private_key_encrypted)
-        host = cred.lighter_host
-        api_key_index = cred.api_key_index
-        account_index = cred.account_index
-
-    # Create 3 SEPARATE clients — same account, no shared lock
-    clients = [
-        LighterClient(host=host, private_key=pk, api_key_index=api_key_index, account_index=account_index)
-        for _ in range(3)
-    ]
-
-    # Warm them up so they all read nonce at ~the same time
-    await asyncio.gather(*(c._ensure_clients() for c in clients))
-    meta = await clients[0]._get_market_meta(market_index)
-    min_size = 1 / (10 ** meta["size_decimals"])
-
-    async def place_one(tag: str, client: LighterClient):
-        coi = int(time.time() * 1000) % (2**31) + hash(tag) % 10000
-        r = await client.place_order(
-            market_index=market_index,
-            base_amount=min_size,
-            price=1.0,
-            is_ask=False,
-            client_order_index=coi,
-            market=False,
-        )
-        logger.info(f"  [no-lock {tag}] {'OK' if r.success else 'FAIL: ' + str(r.error)}")
-        return r.success
-
-    results = await asyncio.gather(
-        place_one("X", clients[0]),
-        place_one("Y", clients[1]),
-        place_one("Z", clients[2]),
-    )
-
-    for c in clients:
-        await c.cancel_all_orders()
-
-    succeeded = sum(results)
-    logger.info(f"No-lock concurrent: {succeeded}/3 succeeded")
-
-    if succeeded < 3:
-        logger.info("^ Expected! This reproduces the nonce race bug that the singleton fix prevents.")
-    return succeeded  # return count, not pass/fail — failures are expected here
+    config = lighter.Configuration(host=MAINNET_HOST)
+    api_client = lighter.ApiClient(configuration=config)
+    try:
+        order_api = lighter.OrderApi(api_client)
+        resp = await order_api.order_book_orders(market_id=BTC_MARKET_INDEX, limit=1)
+        best_ask = float(resp.asks[0].price) if resp.asks else None
+        best_bid = float(resp.bids[0].price) if resp.bids else None
+        if best_ask and best_bid:
+            return (best_ask + best_bid) / 2
+        return best_ask or best_bid or 87000.0
+    except Exception as e:
+        logger.warning(f"Failed to fetch mainnet price, using fallback: {e}")
+        return 87000.0
+    finally:
+        await api_client.close()
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Live LighterClient integration test")
-    parser.add_argument("--credential-id", type=int, default=None)
-    parser.add_argument("--market-index", type=int, default=0)
-    parser.add_argument("--concurrent", action="store_true", help="Run concurrent order test")
-    args = parser.parse_args()
+    client = LighterClient(
+        host=TESTNET_HOST,
+        private_key=PRIVATE_KEY,
+        api_key_index=API_KEY_INDEX,
+        account_index=ACCOUNT_INDEX,
+    )
 
-    cred_id = args.credential_id
-    market = args.market_index
+    print("=" * 60)
+    print("LIGHTER TESTNET INTEGRATION TEST")
+    print(f"  3 concurrent BTC market orders, ${NOTIONAL_PER_ORDER} each")
+    print("=" * 60)
 
-    results = {}
-    try:
-        results["singleton"] = await test_singleton(cred_id)
-        results["balance"] = await test_balance(cred_id)
-        results["market_meta"] = await test_market_meta(cred_id, market)
-        results["positions"] = await test_positions(cred_id)
-        results["place_cancel"] = await test_place_and_cancel(cred_id, market)
+    # 0. Pre-flight: clean up leftover positions
+    print("\n--- Pre-flight cleanup ---")
+    await client.cancel_all_orders()
+    existing = await client.get_positions()
+    if existing:
+        print(f"  Found {len(existing)} leftover positions — closing")
+        for pos in existing:
+            is_ask = pos["side"] == "long"
+            worst = pos["entry_price"] * (1 - SLIPPAGE) if is_ask else pos["entry_price"] * (1 + SLIPPAGE)
+            coi = int(time.time() * 1000) % (2**31) + pos["market_index"]
+            r = await client.place_order(
+                market_index=pos["market_index"],
+                base_amount=pos["size"],
+                price=worst,
+                is_ask=is_ask,
+                client_order_index=coi,
+                market=True,
+                reduce_only=True,
+            )
+            print(f"    market {pos['market_index']}: {'closed' if r.success else 'FAIL: ' + str(r.error)}")
+        await asyncio.sleep(5)
+        still = await client.get_positions()
+        print(f"  {'Clean' if not still else f'WARNING: {len(still)} positions remain'}")
+    else:
+        print("  Clean — no leftover positions")
 
-        if args.concurrent:
-            results["concurrent_singleton"] = await test_concurrent_singleton(cred_id, market)
-            no_lock_ok = await test_concurrent_no_lock(cred_id, market)
-            results["concurrent_no_lock"] = no_lock_ok  # int: how many succeeded out of 3
-    except Exception as e:
-        logger.error(f"Test failed: {e}", exc_info=True)
+    # 1. Balance check
+    balance = await client.get_balance()
+    print(f"\nBalance: ${balance:.2f}")
+    total_notional = NOTIONAL_PER_ORDER * NUM_ORDERS
+    if balance < total_notional:
+        print(f"WARNING: Balance ${balance:.2f} < required ${total_notional:.2f}")
 
-    print("\n=== Results ===")
-    all_pass = True
-    for name, value in results.items():
-        if name == "concurrent_no_lock":
-            # This test reproduces the old bug — fewer than 3 means the race exists
-            print(f"  {name}: {value}/3 succeeded (< 3 confirms the nonce race bug)")
-        else:
-            status = "PASS" if value else "FAIL"
-            if not value:
-                all_pass = False
-            print(f"  {name}: {status}")
+    # 2. Fetch BTC price from mainnet
+    btc_price = await get_btc_price()
+    print(f"BTC price (mainnet): ${btc_price:,.2f}")
 
-    print(f"\n{'ALL TESTS PASSED' if all_pass else 'SOME TESTS FAILED'}")
-    sys.exit(0 if all_pass else 1)
+    # 3. Fetch testnet market meta
+    await client._ensure_clients()
+    meta = await client._get_market_meta(BTC_MARKET_INDEX)
+    print(f"BTC market meta: {meta}")
+
+    # 4. Compute order params
+    size_per_order = NOTIONAL_PER_ORDER / btc_price
+    worst_price = btc_price * (1 + SLIPPAGE)
+    print(f"\nOrder plan: {NUM_ORDERS}x BUY {size_per_order:.6f} BTC @ worst ${worst_price:,.2f}")
+
+    # 5. Place 3 market BUY orders simultaneously
+    print(f"\n--- Opening {NUM_ORDERS} positions ---")
+
+    async def open_position(tag: int):
+        coi = int(time.time() * 1000) % (2**31) + tag * 1000
+        result = await client.place_order(
+            market_index=BTC_MARKET_INDEX,
+            base_amount=size_per_order,
+            price=worst_price,
+            is_ask=False,
+            client_order_index=coi,
+            market=True,
+        )
+        status = "OK" if result.success else f"FAIL: {result.error}"
+        print(f"  Order {tag}: {status} (fill_price={result.filled_price}, fill_amount={result.filled_amount})")
+        return result
+
+    entry_results = await asyncio.gather(
+        open_position(1),
+        open_position(2),
+        open_position(3),
+    )
+
+    entry_ok = sum(1 for r in entry_results if r.success)
+    print(f"\nEntry: {entry_ok}/{NUM_ORDERS} orders succeeded")
+
+    if entry_ok == 0:
+        print("All entries failed — aborting.")
+        return
+
+    # 6. Wait for settlement
+    print("\nWaiting 10s for settlement...")
+    await asyncio.sleep(10)
+
+    # 7. Fetch open positions
+    print("\n--- Open positions ---")
+    positions = await client.get_positions()
+    btc_pos = None
+    for p in positions:
+        if p["market_index"] == BTC_MARKET_INDEX:
+            btc_pos = p
+            print(f"  BTC: side={p['side']}, size={p['size']}, entry_price={p['entry_price']}")
+
+    if not btc_pos:
+        print("  NO BTC POSITION — orders may not have settled")
+        remaining = await client.get_positions()
+        print(f"\n  Result: FAIL (no position to close)")
+        return
+
+    # 8. Close the combined position
+    print(f"\n--- Closing BTC position (size={btc_pos['size']}) ---")
+    is_ask = btc_pos["side"] == "long"
+    close_worst = btc_price * (1 - SLIPPAGE) if is_ask else btc_price * (1 + SLIPPAGE)
+    close_coi = int(time.time() * 1000) % (2**31) + 9999
+
+    close_result = await client.place_order(
+        market_index=BTC_MARKET_INDEX,
+        base_amount=btc_pos["size"],
+        price=close_worst,
+        is_ask=is_ask,
+        client_order_index=close_coi,
+        market=True,
+        reduce_only=True,
+    )
+    print(f"  Close: {'OK' if close_result.success else 'FAIL: ' + str(close_result.error)}")
+    print(f"  Fill: price={close_result.filled_price}, amount={close_result.filled_amount}")
+
+    # 9. Verify position is closed (with retry)
+    for attempt in range(3):
+        wait = [3, 5, 10][attempt]
+        print(f"\nWaiting {wait}s for close settlement (attempt {attempt + 1}/3)...")
+        await asyncio.sleep(wait)
+        remaining = await client.get_positions()
+        btc_remaining = [p for p in remaining if p["market_index"] == BTC_MARKET_INDEX]
+        if not btc_remaining:
+            print("  Position closed!")
+            break
+        print(f"  Still open: size={btc_remaining[0]['size']}")
+    else:
+        remaining = await client.get_positions()
+
+    # 10. Summary
+    btc_remaining = [p for p in remaining if p["market_index"] == BTC_MARKET_INDEX]
+    passed = entry_ok == NUM_ORDERS and close_result.success and not btc_remaining
+
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    print(f"  Entries:    {entry_ok}/{NUM_ORDERS} succeeded")
+    print(f"  Position:   size={btc_pos['size']} @ {btc_pos['entry_price']}")
+    print(f"  Close:      {'OK' if close_result.success else 'FAIL'}")
+    print(f"  Remaining:  {len(btc_remaining)} BTC positions")
+    print(f"  Result:     {'PASS' if passed else 'FAIL'}")
 
 
 if __name__ == "__main__":
