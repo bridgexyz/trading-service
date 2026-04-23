@@ -88,8 +88,8 @@ async def _run_pair_cycle_once(pair_id: int):
         # Step 1: Fetch market data
         from backend.services.market_data import fetch_pair_data
 
-        # Fetch enough candles for both z-score and RSI (RSI needs rsi_period + 2)
-        fetch_candles = max(pair.window_candles, pair.rsi_period + 2)
+        # Fetch enough candles for RSI Wilder smoothing to converge
+        fetch_candles = max(pair.window_candles, pair.rsi_period * 5)
 
         data = await fetch_pair_data(
             asset_a=pair.asset_a,
