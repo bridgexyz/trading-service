@@ -22,6 +22,14 @@ class OrderResult:
     raw_response: str | None = None
 
 
+@dataclass
+class PairOrderResult:
+    success: bool
+    result_a: OrderResult
+    result_b: OrderResult
+    error: str | None = None
+
+
 class LighterClient:
     """Wrapper around the Lighter SDK for trading operations."""
 
@@ -245,6 +253,157 @@ class LighterClient:
                 async with self._sign_lock:
                     await self.reinit_signer()
             return OrderResult(success=False, error=str(e))
+
+    async def place_pair_orders(
+        self,
+        market_index_a: int,
+        base_amount_a: float,
+        price_a: float,
+        is_ask_a: bool,
+        market_index_b: int,
+        base_amount_b: float,
+        price_b: float,
+        is_ask_b: bool,
+        client_order_index_a: int | None = None,
+        client_order_index_b: int | None = None,
+        market: bool = False,
+        reduce_only: bool = False,
+    ) -> PairOrderResult:
+        """Place two orders in a single batch HTTP call.
+
+        Signs both legs locally, then submits via send_tx_batch() — one
+        rate-limit slot, one throttle wait, no price drift between legs.
+        """
+        await self._ensure_clients()
+
+        ts = int(time.time() * 1000) % (2**31)
+        if client_order_index_a is None:
+            client_order_index_a = ts
+        if client_order_index_b is None:
+            client_order_index_b = ts + 1
+
+        _fail_a = OrderResult(success=False)
+        _fail_b = OrderResult(success=False)
+
+        if self._mock_mode:
+            logger.info(f"MOCK batch: A=market{market_index_a}, B=market{market_index_b}")
+            return PairOrderResult(
+                success=True,
+                result_a=OrderResult(success=True, order_id=f"mock-{client_order_index_a}"),
+                result_b=OrderResult(success=True, order_id=f"mock-{client_order_index_b}"),
+            )
+
+        nonces_obtained = False
+        nm = None
+        api_key_idx = self.api_key_index
+
+        try:
+            meta_a = await self._get_market_meta(market_index_a)
+            meta_b = await self._get_market_meta(market_index_b)
+
+            price_int_a = int(round(price_a * 10 ** meta_a["price_decimals"]))
+            amount_int_a = int(round(base_amount_a * 10 ** meta_a["size_decimals"]))
+            price_int_b = int(round(price_b * 10 ** meta_b["price_decimals"]))
+            amount_int_b = int(round(base_amount_b * 10 ** meta_b["size_decimals"]))
+
+            order_type = 1 if market else 0
+            time_in_force = 0 if market else 1
+            order_expiry = 0 if market else -1
+
+            async with self._sign_lock:
+                await self._throttle()
+
+                nm = self._signer_client.nonce_manager
+                api_key_idx, nonce_a = nm.next_nonce(api_key=self.api_key_index)
+                _, nonce_b = nm.next_nonce(api_key=self.api_key_index)
+                nonces_obtained = True
+
+                tx_type_a, tx_info_a, tx_hash_a, err_a = self._signer_client.sign_create_order(
+                    market_index=market_index_a,
+                    client_order_index=client_order_index_a,
+                    base_amount=amount_int_a,
+                    price=price_int_a,
+                    is_ask=is_ask_a,
+                    order_type=order_type,
+                    time_in_force=time_in_force,
+                    order_expiry=order_expiry,
+                    reduce_only=reduce_only,
+                    nonce=nonce_a,
+                    api_key_index=api_key_idx,
+                )
+                if err_a is not None:
+                    logger.error(f"Batch sign leg A failed: {err_a}")
+                    nm.acknowledge_failure(api_key_idx)
+                    nm.acknowledge_failure(api_key_idx)
+                    if self._is_sign_error(str(err_a)):
+                        await self.reinit_signer()
+                    return PairOrderResult(success=False, result_a=_fail_a, result_b=_fail_b, error=f"sign A: {err_a}")
+
+                tx_type_b, tx_info_b, tx_hash_b, err_b = self._signer_client.sign_create_order(
+                    market_index=market_index_b,
+                    client_order_index=client_order_index_b,
+                    base_amount=amount_int_b,
+                    price=price_int_b,
+                    is_ask=is_ask_b,
+                    order_type=order_type,
+                    time_in_force=time_in_force,
+                    order_expiry=order_expiry,
+                    reduce_only=reduce_only,
+                    nonce=nonce_b,
+                    api_key_index=api_key_idx,
+                )
+                if err_b is not None:
+                    logger.error(f"Batch sign leg B failed: {err_b}")
+                    nm.acknowledge_failure(api_key_idx)
+                    if self._is_sign_error(str(err_b)):
+                        await self.reinit_signer()
+                    return PairOrderResult(success=False, result_a=_fail_a, result_b=_fail_b, error=f"sign B: {err_b}")
+
+                batch_resp = await self._signer_client.send_tx_batch(
+                    tx_types=[tx_type_a, tx_type_b],
+                    tx_infos=[tx_info_a, tx_info_b],
+                )
+
+                if batch_resp.code != 200:
+                    err_msg = batch_resp.message or f"code {batch_resp.code}"
+                    logger.error(f"Batch rejected: {err_msg}")
+                    nm.acknowledge_failure(api_key_idx)
+                    nm.acknowledge_failure(api_key_idx)
+                    if self._is_sign_error(str(err_msg)):
+                        await self.reinit_signer()
+                    return PairOrderResult(success=False, result_a=_fail_a, result_b=_fail_b, error=err_msg)
+
+            filled_price_a = price_a
+            filled_amount_a = base_amount_a
+            filled_price_b = price_b
+            filled_amount_b = base_amount_b
+            raw = str(batch_resp)
+
+            logger.info(
+                f"Batch placed: A={client_order_index_a} (market{market_index_a}), "
+                f"B={client_order_index_b} (market{market_index_b})"
+            )
+            return PairOrderResult(
+                success=True,
+                result_a=OrderResult(
+                    success=True, order_id=str(client_order_index_a),
+                    filled_price=filled_price_a, filled_amount=filled_amount_a, raw_response=raw,
+                ),
+                result_b=OrderResult(
+                    success=True, order_id=str(client_order_index_b),
+                    filled_price=filled_price_b, filled_amount=filled_amount_b, raw_response=raw,
+                ),
+            )
+
+        except Exception as e:
+            logger.error(f"Batch order failed: {e}")
+            if nonces_obtained and nm:
+                nm.acknowledge_failure(api_key_idx)
+                nm.acknowledge_failure(api_key_idx)
+            if self._is_sign_error(str(e)):
+                async with self._sign_lock:
+                    await self.reinit_signer()
+            return PairOrderResult(success=False, result_a=_fail_a, result_b=_fail_b, error=str(e))
 
     async def cancel_all_orders(self) -> bool:
         """Cancel all open orders across all markets."""

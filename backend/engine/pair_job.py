@@ -217,36 +217,20 @@ async def _execute_sliced_orders(
         worst_a = mid_a * (1 - SLIPPAGE) if is_ask_a else mid_a * (1 + SLIPPAGE)
         worst_b = mid_b * (1 - SLIPPAGE) if is_ask_b else mid_b * (1 + SLIPPAGE)
 
-        result_a = await client.place_order(
-            market_index=pair.lighter_market_a,
-            base_amount=chunk_size_a,
-            price=worst_a,
-            is_ask=is_ask_a,
-            market=True,
-            reduce_only=reduce_only,
+        chunk_result = await client.place_pair_orders(
+            market_index_a=pair.lighter_market_a, base_amount_a=chunk_size_a,
+            price_a=worst_a, is_ask_a=is_ask_a,
+            market_index_b=pair.lighter_market_b, base_amount_b=chunk_size_b,
+            price_b=worst_b, is_ask_b=is_ask_b,
+            market=True, reduce_only=reduce_only,
         )
 
-        if not result_a.success:
-            logger.error(f"[{pair.name}] Sliced chunk {i+1} leg A failed: {result_a.error}")
+        if not chunk_result.success:
+            logger.error(f"[{pair.name}] Sliced chunk {i+1} batch failed: {chunk_result.error}")
             break
 
-        result_b = await client.place_order(
-            market_index=pair.lighter_market_b,
-            base_amount=chunk_size_b,
-            price=worst_b,
-            is_ask=is_ask_b,
-            market=True,
-            reduce_only=reduce_only,
-        )
-
-        if not result_b.success:
-            # Leg A succeeded but leg B failed — rollback this chunk's leg A
-            logger.warning(f"[{pair.name}] Sliced chunk {i+1} leg B failed, rolling back leg A")
-            await client.cancel_order(
-                market_index=pair.lighter_market_a, order_id=result_a.order_id
-            )
-            break
-
+        result_a = chunk_result.result_a
+        result_b = chunk_result.result_b
         last_result_a = result_a
         last_result_b = result_b
         completed += 1
@@ -566,21 +550,20 @@ async def _handle_entry(pair: TradingPair, signals, prices_a, prices_b, close_a:
         worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
         worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
 
-        result_a = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a
+        pair_result = await lighter_client.place_pair_orders(
+            market_index_a=pair.lighter_market_a, base_amount_a=size_a,
+            price_a=worst_price_a, is_ask_a=is_ask_a,
+            market_index_b=pair.lighter_market_b, base_amount_b=size_b,
+            price_b=worst_price_b, is_ask_b=is_ask_b,
+            market=True,
         )
-        result_b = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b
-        )
+        result_a = pair_result.result_a
+        result_b = pair_result.result_b
 
-        if not result_a.success or not result_b.success:
-            err = result_a.error or result_b.error
-            # Cancel the successful leg to avoid orphaned single-sided position
-            await _rollback_partial_fill(
-                lighter_client, pair, result_a, result_b, "entry", signals
-            )
+        if not pair_result.success:
+            err = pair_result.error or result_a.error or result_b.error
             _log_cycle(pair.id, "error", signals=signals, action="entry_failed",
-                        message=f"Order failed (rolled back): {err}",
+                        message=f"Batch order failed: {err}",
                         close_a=close_a, close_b=close_b)
             return
 
@@ -806,21 +789,20 @@ async def execute_exit(
         worst_price_a = current_price_a * (1 - SLIPPAGE) if is_ask_a else current_price_a * (1 + SLIPPAGE)
         worst_price_b = current_price_b * (1 - SLIPPAGE) if is_ask_b else current_price_b * (1 + SLIPPAGE)
 
-        # Place exit orders based on order_mode with reduce_only
-        result_a = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_a, size_a, worst_price_a, is_ask_a, reduce_only=True
+        pair_result = await lighter_client.place_pair_orders(
+            market_index_a=pair.lighter_market_a, base_amount_a=size_a,
+            price_a=worst_price_a, is_ask_a=is_ask_a,
+            market_index_b=pair.lighter_market_b, base_amount_b=size_b,
+            price_b=worst_price_b, is_ask_b=is_ask_b,
+            market=True, reduce_only=True,
         )
-        result_b = await _place_pair_order(
-            lighter_client, pair, pair.lighter_market_b, size_b, worst_price_b, is_ask_b, reduce_only=True
-        )
+        result_a = pair_result.result_a
+        result_b = pair_result.result_b
 
-        if not result_a.success or not result_b.success:
-            err = result_a.error or result_b.error
-            await _rollback_partial_fill(
-                lighter_client, pair, result_a, result_b, "exit", signals
-            )
+        if not pair_result.success:
+            err = pair_result.error or result_a.error or result_b.error
             _log_cycle(pair.id, "error", signals=signals, action="exit_failed",
-                        message=f"Close order failed (rolled back): {err}",
+                        message=f"Batch close failed: {err}",
                         close_a=close_a, close_b=close_b)
             return
 
