@@ -355,6 +355,7 @@ class LighterClient:
                 if err_b is not None:
                     logger.error(f"Batch sign leg B failed: {err_b}")
                     nm.acknowledge_failure(api_key_idx)
+                    nm.acknowledge_failure(api_key_idx)
                     if self._is_sign_error(str(err_b)):
                         await self.reinit_signer()
                     return PairOrderResult(success=False, result_a=_fail_a, result_b=_fail_b, error=f"sign B: {err_b}")
