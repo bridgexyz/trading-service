@@ -80,31 +80,51 @@ function NumberField({
   label,
   value,
   onChange,
-  step = 1,
   min,
 }: {
   label: string;
-  value: number;
-  onChange: (v: number) => void;
+  value: number | "";
+  onChange: (v: number | "") => void;
   step?: number;
   min?: number;
 }) {
+  const [displayValue, setDisplayValue] = useState(String(value));
+
+  useEffect(() => {
+    setDisplayValue(String(value));
+  }, [value]);
+
   return (
     <div>
       <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
         {label}
       </label>
       <input
-        type="number"
-        step={step}
-        min={min}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onWheel={(e) => {
-          e.preventDefault();
-          const delta = e.deltaY < 0 ? step : -step;
-          const newVal = Math.round((value + delta) * 1000) / 1000;
-          onChange(min !== undefined ? Math.max(min, newVal) : newVal);
+        type="text"
+        inputMode="decimal"
+        value={displayValue}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (!/^\d*\.?\d*$/.test(next)) return;
+
+          setDisplayValue(next);
+          if (next === "") {
+            onChange("");
+            return;
+          }
+          if (next === ".") return;
+
+          const parsed = Number(next);
+          if (!Number.isFinite(parsed)) return;
+          onChange(parsed);
+        }}
+        onBlur={() => {
+          if (displayValue === "" || displayValue === ".") return;
+          const parsed = Number(displayValue);
+          if (!Number.isFinite(parsed)) return;
+          const normalized = min !== undefined ? Math.max(min, parsed) : parsed;
+          setDisplayValue(String(normalized));
+          onChange(normalized);
         }}
         className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-24"
       />
@@ -131,11 +151,16 @@ type QuickTradeUpdate = {
   take_profit_pct?: number;
 };
 
+const hasNumber = (value: number | ""): value is number => value !== "";
+
 export default function QuickTradePage() {
   const qc = useQueryClient();
   const [form, setForm] = useState(defaults);
   const [editingTradeId, setEditingTradeId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ stop_loss_pct: 0, take_profit_pct: 0 });
+  const [editForm, setEditForm] = useState<{
+    stop_loss_pct: number | "";
+    take_profit_pct: number | "";
+  }>({ stop_loss_pct: 0, take_profit_pct: 0 });
   const [error, setError] = useState("");
 
   const { data: markets = [] } = useQuery<Market[]>({
@@ -195,6 +220,7 @@ export default function QuickTradePage() {
     setError("");
   };
   const saveEdit = (id: number) => {
+    if (!hasNumber(editForm.stop_loss_pct) || !hasNumber(editForm.take_profit_pct)) return;
     updateMut.mutate({
       id,
       data: {
@@ -206,6 +232,15 @@ export default function QuickTradePage() {
 
   const openTrades = trades.filter((t) => t.status === "open");
   const closedTrades = trades.filter((t) => t.status === "closed" || t.status === "failed");
+  const canOpenTrade =
+    !!form.asset_a &&
+    !!form.asset_b &&
+    form.asset_a !== form.asset_b &&
+    hasNumber(form.ratio) &&
+    hasNumber(form.margin_usd) &&
+    hasNumber(form.leverage) &&
+    hasNumber(form.stop_loss_pct) &&
+    hasNumber(form.take_profit_pct);
 
   return (
     <div className="space-y-6">
@@ -280,7 +315,7 @@ export default function QuickTradePage() {
           </div>
           <button
             className="px-5 py-2 bg-accent text-surface-0 rounded-md text-[12px] font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-all"
-            disabled={!form.asset_a || !form.asset_b || form.asset_a === form.asset_b || openMut.isPending}
+            disabled={!canOpenTrade || openMut.isPending}
             onClick={() => openMut.mutate(form)}
           >
             {openMut.isPending ? "Opening..." : "Open Trade"}
@@ -357,7 +392,11 @@ export default function QuickTradePage() {
                           <>
                             <button
                               className="px-2 py-1 bg-accent/10 text-accent border border-accent/20 rounded text-[11px] hover:bg-accent/20 disabled:opacity-50"
-                              disabled={updateMut.isPending}
+                              disabled={
+                                updateMut.isPending ||
+                                !hasNumber(editForm.stop_loss_pct) ||
+                                !hasNumber(editForm.take_profit_pct)
+                              }
                               onClick={() => saveEdit(t.id)}
                             >
                               {updateMut.isPending ? "Saving..." : "Save"}
