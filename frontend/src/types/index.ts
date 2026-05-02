@@ -138,6 +138,37 @@ export interface ExchangePosition {
   unrealized_pnl_pct: number;
 }
 
+export interface SimplePairTrade {
+  id: number;
+  asset_a: string;
+  asset_b: string;
+  lighter_market_a: number;
+  lighter_market_b: number;
+  direction: number;
+  ratio: number;
+  margin_usd: number;
+  leverage: number;
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  slice_chunks: number;
+  slice_delay_sec: number;
+  credential_id: number | null;
+  status: string;
+  entry_price_a: number | null;
+  entry_price_b: number | null;
+  fill_size_a: number | null;
+  fill_size_b: number | null;
+  entry_notional: number | null;
+  entry_time: string | null;
+  exit_price_a: number | null;
+  exit_price_b: number | null;
+  exit_time: string | null;
+  exit_reason: string | null;
+  pnl: number | null;
+  pnl_pct: number | null;
+  created_at: string;
+}
+
 export interface LoginRequest {
   username: string;
   password: string;

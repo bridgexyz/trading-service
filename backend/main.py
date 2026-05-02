@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.config import settings
 from backend.database import create_db_and_tables
 from backend.utils.logging import setup_logging
-from backend.api import auth, pairs, credentials, trades, positions, dashboard, system, markets, guardian
+from backend.api import auth, pairs, credentials, trades, positions, dashboard, system, markets, guardian, quick_trades
 
 
 @asynccontextmanager
@@ -63,6 +63,7 @@ app.include_router(dashboard.router)
 app.include_router(system.router)
 app.include_router(markets.router)
 app.include_router(guardian.router)
+app.include_router(quick_trades.router)
 
 # Serve frontend static files in production (must be after all API routers).
 # Skip when CORS origins include localhost dev server (i.e. Vite is running separately).

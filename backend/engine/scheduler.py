@@ -92,6 +92,7 @@ def reschedule_pair_job(pair_id: int, schedule_interval: str):
 
 
 GUARDIAN_JOB_ID = "stop_loss_guardian"
+SIMPLE_GUARDIAN_JOB_ID = "simple_trade_guardian"
 
 
 def add_guardian_job(interval_minutes: int):
@@ -112,6 +113,26 @@ def add_guardian_job(interval_minutes: int):
         misfire_grace_time=30,
     )
     logger.info(f"Guardian job scheduled every {interval_minutes}m")
+
+
+def add_simple_trade_guardian_job(interval_minutes: int):
+    """Add or replace the simple trade guardian job (SL + TP monitoring)."""
+    from backend.engine.simple_trade_guardian import run_simple_trade_check
+
+    if scheduler.get_job(SIMPLE_GUARDIAN_JOB_ID):
+        scheduler.remove_job(SIMPLE_GUARDIAN_JOB_ID)
+
+    scheduler.add_job(
+        run_simple_trade_check,
+        trigger=IntervalTrigger(minutes=interval_minutes),
+        id=SIMPLE_GUARDIAN_JOB_ID,
+        name="Simple Trade Guardian",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
+    logger.info(f"Simple trade guardian scheduled every {interval_minutes}m")
 
 
 def remove_guardian_job():
@@ -140,10 +161,11 @@ def start_scheduler():
                     interval = pair.exit_schedule_interval
             add_pair_job(pair.id, interval)
 
-        # Start guardian job if enabled
+        # Start guardian jobs if enabled
         guardian = session.get(GuardianSettings, 1)
         if guardian and guardian.enabled:
             add_guardian_job(guardian.interval_minutes)
+            add_simple_trade_guardian_job(guardian.interval_minutes)
 
     scheduler.start()
     logger.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")

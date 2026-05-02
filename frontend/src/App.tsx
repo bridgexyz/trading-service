@@ -9,6 +9,7 @@ import CredentialsPage from "./pages/CredentialsPage";
 import LogsPage from "./pages/LogsPage";
 import LoginPage from "./pages/LoginPage";
 import GuardianPage from "./pages/GuardianPage";
+import QuickTradePage from "./pages/QuickTradePage";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
                   <Route path="/pairs/:id" element={<PairDetailPage />} />
                   <Route path="/credentials" element={<CredentialsPage />} />
                   <Route path="/logs" element={<LogsPage />} />
+                  <Route path="/quick-trade" element={<QuickTradePage />} />
                   <Route path="/guardian" element={<GuardianPage />} />
                 </Routes>
               </Layout>

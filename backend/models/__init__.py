@@ -8,6 +8,7 @@ from backend.models.job_log import JobLog
 from backend.models.credential import Credential
 from backend.models.user import User
 from backend.models.guardian_settings import GuardianSettings
+from backend.models.simple_trade import SimplePairTrade
 
 __all__ = [
     "TradingPair",
@@ -18,4 +19,5 @@ __all__ = [
     "Credential",
     "User",
     "GuardianSettings",
+    "SimplePairTrade",
 ]
