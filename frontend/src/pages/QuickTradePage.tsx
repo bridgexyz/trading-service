@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import type { SimplePairTrade, Credential } from "../types";
@@ -6,6 +6,110 @@ import type { SimplePairTrade, Credential } from "../types";
 interface Market {
   market_id: number;
   symbol: string;
+}
+
+function AssetAutocomplete({
+  label,
+  value,
+  onChange,
+  markets,
+  onSelect,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  markets: Market[];
+  onSelect: (market: Market) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = value
+    ? markets.filter((m) =>
+        m.symbol.toLowerCase().includes(value.toLowerCase())
+      )
+    : markets;
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary placeholder:text-text-muted/50 hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-36"
+        placeholder="Search..."
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-10 mt-1 w-52 max-h-48 overflow-auto bg-surface-1 border border-border-default rounded-lg shadow-2xl shadow-black/40">
+          {filtered.map((m) => (
+            <button
+              key={m.market_id}
+              type="button"
+              onClick={() => {
+                onSelect(m);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3.5 py-2 text-[13px] font-mono hover:bg-surface-2 transition-colors text-text-primary"
+            >
+              {m.symbol}{" "}
+              <span className="text-text-muted text-[10px]">#{m.market_id}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  step = 1,
+  min,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  min?: number;
+}) {
+  return (
+    <div>
+      <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+        {label}
+      </label>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onWheel={(e) => {
+          e.preventDefault();
+          const delta = e.deltaY < 0 ? step : -step;
+          const newVal = Math.round((value + delta) * 1000) / 1000;
+          onChange(min !== undefined ? Math.max(min, newVal) : newVal);
+        }}
+        className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all w-24"
+      />
+    </div>
+  );
 }
 
 const defaults = {
@@ -69,8 +173,8 @@ export default function QuickTradePage() {
       <h1 className="text-lg font-semibold text-text-primary">Quick Trade</h1>
 
       {/* Open Trade Form */}
-      <div className="bg-surface-1 border border-border-default rounded-lg p-4 space-y-4">
-        <h2 className="text-sm font-medium text-text-primary">Open New Trade</h2>
+      <div className="bg-surface-1 border border-border-default rounded-lg p-5 space-y-5">
+        <h2 className="text-[11px] font-mono uppercase tracking-[0.15em] text-text-secondary">New Trade</h2>
 
         {error && (
           <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded px-3 py-2">
@@ -78,42 +182,28 @@ export default function QuickTradePage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {/* Asset A */}
+        {/* Assets row */}
+        <div className="flex flex-wrap items-end gap-4">
+          <AssetAutocomplete
+            label="Asset A"
+            value={form.asset_a}
+            onChange={(v) => set("asset_a", v)}
+            markets={markets}
+            onSelect={(m) => set("asset_a", m.symbol)}
+          />
+          <AssetAutocomplete
+            label="Asset B"
+            value={form.asset_b}
+            onChange={(v) => set("asset_b", v)}
+            markets={markets}
+            onSelect={(m) => set("asset_b", m.symbol)}
+          />
           <div>
-            <label className="block text-[11px] text-text-muted mb-1">Asset A</label>
+            <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+              Direction
+            </label>
             <select
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.asset_a}
-              onChange={(e) => set("asset_a", e.target.value)}
-            >
-              <option value="">Select...</option>
-              {markets.map((m) => (
-                <option key={m.market_id} value={m.symbol}>{m.symbol}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Asset B */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Asset B</label>
-            <select
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.asset_b}
-              onChange={(e) => set("asset_b", e.target.value)}
-            >
-              <option value="">Select...</option>
-              {markets.map((m) => (
-                <option key={m.market_id} value={m.symbol}>{m.symbol}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Direction */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Direction</label>
-            <select
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+              className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
               value={form.direction}
               onChange={(e) => set("direction", Number(e.target.value))}
             >
@@ -121,74 +211,25 @@ export default function QuickTradePage() {
               <option value={-1}>Long B / Short A</option>
             </select>
           </div>
-
-          {/* Ratio */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">A/B Ratio</label>
-            <input
-              type="number"
-              step="0.1"
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.ratio}
-              onChange={(e) => set("ratio", Number(e.target.value))}
-            />
-          </div>
-
-          {/* Margin */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Margin ($)</label>
-            <input
-              type="number"
-              step="10"
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.margin_usd}
-              onChange={(e) => set("margin_usd", Number(e.target.value))}
-            />
-          </div>
-
-          {/* Leverage */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Leverage</label>
-            <input
-              type="number"
-              step="1"
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.leverage}
-              onChange={(e) => set("leverage", Number(e.target.value))}
-            />
-          </div>
-
-          {/* Stop Loss */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Stop Loss %</label>
-            <input
-              type="number"
-              step="1"
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.stop_loss_pct}
-              onChange={(e) => set("stop_loss_pct", Number(e.target.value))}
-            />
-          </div>
-
-          {/* Take Profit */}
-          <div>
-            <label className="block text-[11px] text-text-muted mb-1">Take Profit %</label>
-            <input
-              type="number"
-              step="1"
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
-              value={form.take_profit_pct}
-              onChange={(e) => set("take_profit_pct", Number(e.target.value))}
-            />
-          </div>
         </div>
 
-        {/* Credential selector + submit */}
-        <div className="flex items-end gap-3">
-          <div className="flex-1 max-w-[200px]">
-            <label className="block text-[11px] text-text-muted mb-1">Credential</label>
+        {/* Parameters row */}
+        <div className="flex flex-wrap items-end gap-4">
+          <NumberField label="A/B Ratio" value={form.ratio} onChange={(v) => set("ratio", v)} step={0.1} min={0.1} />
+          <NumberField label="Margin ($)" value={form.margin_usd} onChange={(v) => set("margin_usd", v)} step={10} min={1} />
+          <NumberField label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} step={1} min={1} />
+          <NumberField label="Stop Loss %" value={form.stop_loss_pct} onChange={(v) => set("stop_loss_pct", v)} step={1} min={1} />
+          <NumberField label="Take Profit %" value={form.take_profit_pct} onChange={(v) => set("take_profit_pct", v)} step={1} min={1} />
+        </div>
+
+        {/* Credential + submit */}
+        <div className="flex items-end gap-4 pt-1">
+          <div>
+            <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+              Credential
+            </label>
             <select
-              className="w-full bg-surface-0 border border-border-default rounded px-2 py-1.5 text-xs text-text-primary"
+              className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
               value={form.credential_id ?? ""}
               onChange={(e) => set("credential_id", e.target.value ? Number(e.target.value) : null)}
             >
@@ -199,7 +240,7 @@ export default function QuickTradePage() {
             </select>
           </div>
           <button
-            className="px-4 py-1.5 bg-accent text-surface-0 rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-50"
+            className="px-5 py-2 bg-accent text-surface-0 rounded-md text-[12px] font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-all"
             disabled={!form.asset_a || !form.asset_b || form.asset_a === form.asset_b || openMut.isPending}
             onClick={() => openMut.mutate(form)}
           >
@@ -210,7 +251,7 @@ export default function QuickTradePage() {
 
       {/* Open Trades */}
       <div className="bg-surface-1 border border-border-default rounded-lg p-4">
-        <h2 className="text-sm font-medium text-text-primary mb-3">
+        <h2 className="text-[11px] font-mono uppercase tracking-[0.15em] text-text-secondary mb-3">
           Open Trades ({openTrades.length})
         </h2>
         {openTrades.length === 0 ? (
@@ -233,7 +274,7 @@ export default function QuickTradePage() {
               <tbody>
                 {openTrades.map((t) => (
                   <tr key={t.id} className="border-b border-border-default/50 hover:bg-surface-0/50">
-                    <td className="py-2 px-2 text-text-primary font-medium">
+                    <td className="py-2 px-2 text-text-primary font-medium font-mono">
                       {t.asset_a}/{t.asset_b}
                     </td>
                     <td className="py-2 px-2">
@@ -271,7 +312,7 @@ export default function QuickTradePage() {
 
       {/* Trade History */}
       <div className="bg-surface-1 border border-border-default rounded-lg p-4">
-        <h2 className="text-sm font-medium text-text-primary mb-3">
+        <h2 className="text-[11px] font-mono uppercase tracking-[0.15em] text-text-secondary mb-3">
           History ({closedTrades.length})
         </h2>
         {closedTrades.length === 0 ? (
@@ -293,7 +334,7 @@ export default function QuickTradePage() {
               <tbody>
                 {closedTrades.map((t) => (
                   <tr key={t.id} className="border-b border-border-default/50 hover:bg-surface-0/50">
-                    <td className="py-2 px-2 text-text-primary font-medium">
+                    <td className="py-2 px-2 text-text-primary font-medium font-mono">
                       {t.asset_a}/{t.asset_b}
                     </td>
                     <td className="py-2 px-2">
