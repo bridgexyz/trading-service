@@ -126,9 +126,16 @@ const defaults = {
   credential_id: null as number | null,
 };
 
+type QuickTradeUpdate = {
+  stop_loss_pct?: number;
+  take_profit_pct?: number;
+};
+
 export default function QuickTradePage() {
   const qc = useQueryClient();
   const [form, setForm] = useState(defaults);
+  const [editingTradeId, setEditingTradeId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ stop_loss_pct: 0, take_profit_pct: 0 });
   const [error, setError] = useState("");
 
   const { data: markets = [] } = useQuery<Market[]>({
@@ -163,7 +170,39 @@ export default function QuickTradePage() {
     onError: (e: any) => setError(e.response?.data?.detail || "Failed to close trade"),
   });
 
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: QuickTradeUpdate }) =>
+      api.patch(`/quick-trades/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["quick-trades"] });
+      setEditingTradeId(null);
+      setError("");
+    },
+    onError: (e: any) => setError(e.response?.data?.detail || "Failed to update trade"),
+  });
+
   const set = (key: string, value: any) => setForm((f) => ({ ...f, [key]: value }));
+  const startEdit = (trade: SimplePairTrade) => {
+    setEditingTradeId(trade.id);
+    setEditForm({
+      stop_loss_pct: trade.stop_loss_pct,
+      take_profit_pct: trade.take_profit_pct,
+    });
+    setError("");
+  };
+  const cancelEdit = () => {
+    setEditingTradeId(null);
+    setError("");
+  };
+  const saveEdit = (id: number) => {
+    updateMut.mutate({
+      id,
+      data: {
+        stop_loss_pct: editForm.stop_loss_pct,
+        take_profit_pct: editForm.take_profit_pct,
+      },
+    });
+  };
 
   const openTrades = trades.filter((t) => t.status === "open");
   const closedTrades = trades.filter((t) => t.status === "closed" || t.status === "failed");
@@ -285,7 +324,26 @@ export default function QuickTradePage() {
                     <td className="py-2 px-2 text-right text-text-primary">${t.margin_usd}</td>
                     <td className="py-2 px-2 text-right text-text-primary">{t.leverage}x</td>
                     <td className="py-2 px-2 text-right text-text-muted">
-                      -{t.stop_loss_pct}% / +{t.take_profit_pct}%
+                      {editingTradeId === t.id ? (
+                        <div className="flex justify-end items-end gap-2">
+                          <NumberField
+                            label="SL %"
+                            value={editForm.stop_loss_pct}
+                            onChange={(v) => setEditForm((f) => ({ ...f, stop_loss_pct: v }))}
+                            step={1}
+                            min={0}
+                          />
+                          <NumberField
+                            label="TP %"
+                            value={editForm.take_profit_pct}
+                            onChange={(v) => setEditForm((f) => ({ ...f, take_profit_pct: v }))}
+                            step={1}
+                            min={0}
+                          />
+                        </div>
+                      ) : (
+                        <span>-{t.stop_loss_pct}% / +{t.take_profit_pct}%</span>
+                      )}
                     </td>
                     <td className="py-2 px-2 text-right text-text-primary">
                       ${t.entry_notional?.toFixed(0) ?? "—"}
@@ -294,13 +352,40 @@ export default function QuickTradePage() {
                       {t.entry_time ? new Date(t.entry_time).toLocaleString() : "—"}
                     </td>
                     <td className="py-2 px-2 text-right">
-                      <button
-                        className="px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded text-[11px] hover:bg-red-500/20 disabled:opacity-50"
-                        disabled={closeMut.isPending}
-                        onClick={() => closeMut.mutate(t.id)}
-                      >
-                        Close
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        {editingTradeId === t.id ? (
+                          <>
+                            <button
+                              className="px-2 py-1 bg-accent/10 text-accent border border-accent/20 rounded text-[11px] hover:bg-accent/20 disabled:opacity-50"
+                              disabled={updateMut.isPending}
+                              onClick={() => saveEdit(t.id)}
+                            >
+                              {updateMut.isPending ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              className="px-2 py-1 bg-surface-2 text-text-secondary border border-border-default rounded text-[11px] hover:border-border-hover disabled:opacity-50"
+                              disabled={updateMut.isPending}
+                              onClick={cancelEdit}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="px-2 py-1 bg-surface-2 text-text-secondary border border-border-default rounded text-[11px] hover:border-border-hover"
+                            onClick={() => startEdit(t)}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        <button
+                          className="px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded text-[11px] hover:bg-red-500/20 disabled:opacity-50"
+                          disabled={closeMut.isPending}
+                          onClick={() => closeMut.mutate(t.id)}
+                        >
+                          Close
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

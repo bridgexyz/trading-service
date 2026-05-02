@@ -43,6 +43,11 @@ class QuickTradeCreate(BaseModel):
     credential_id: int | None = None
 
 
+class QuickTradeUpdate(BaseModel):
+    stop_loss_pct: float | None = Field(default=None, ge=0)
+    take_profit_pct: float | None = Field(default=None, ge=0)
+
+
 @router.post("")
 async def open_quick_trade(data: QuickTradeCreate):
     """Open a new simple pair trade with immediate sliced market execution."""
@@ -186,6 +191,31 @@ async def get_quick_trade(trade_id: int):
         trade = session.get(SimplePairTrade, trade_id)
         if not trade:
             raise HTTPException(404, "Trade not found")
+        return trade
+
+
+@router.patch("/{trade_id}")
+async def update_quick_trade(trade_id: int, data: QuickTradeUpdate):
+    """Update editable thresholds for an open quick trade."""
+    update_data = data.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(400, "No fields to update")
+    if any(value is None for value in update_data.values()):
+        raise HTTPException(422, "Threshold values must be numbers")
+
+    with Session(db_engine) as session:
+        trade = session.get(SimplePairTrade, trade_id)
+        if not trade:
+            raise HTTPException(404, "Trade not found")
+        if trade.status != "open":
+            raise HTTPException(400, f"Trade is not open (status={trade.status})")
+
+        for key, value in update_data.items():
+            setattr(trade, key, value)
+
+        session.add(trade)
+        session.commit()
+        session.refresh(trade)
         return trade
 
 
