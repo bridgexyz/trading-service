@@ -150,6 +150,7 @@ export interface SimplePairTrade {
   leverage: number;
   stop_loss_pct: number;
   take_profit_pct: number;
+  order_mode: "market" | "sliced" | "limit";
   slice_chunks: number;
   slice_delay_sec: number;
   credential_id: number | null;

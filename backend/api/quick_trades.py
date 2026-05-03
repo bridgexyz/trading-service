@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -38,8 +39,9 @@ class QuickTradeCreate(BaseModel):
     leverage: float = 5.0
     stop_loss_pct: float = 15.0
     take_profit_pct: float = 5.0
-    slice_chunks: int = 5
-    slice_delay_sec: float = 2.0
+    order_mode: Literal["market", "sliced", "limit"] = "limit"
+    slice_chunks: int = Field(default=5, ge=2, le=50)
+    slice_delay_sec: float = Field(default=2.0, ge=0.5, le=30)
     credential_id: int | None = None
 
 
@@ -50,10 +52,10 @@ class QuickTradeUpdate(BaseModel):
 
 @router.post("")
 async def open_quick_trade(data: QuickTradeCreate):
-    """Open a new simple pair trade with immediate sliced market execution."""
+    """Open a new simple pair trade with immediate execution."""
     from backend.services.market_data import fetch_markets, fetch_orderbook
     from backend.engine.pair_job import _get_lighter_client
-    from backend.engine.order_executor import execute_chunked_pair_orders
+    from backend.engine.order_executor import MARKET_SLIPPAGE, execute_chunked_pair_orders
 
     if data.direction not in (1, -1):
         raise HTTPException(400, "direction must be 1 or -1")
@@ -86,6 +88,7 @@ async def open_quick_trade(data: QuickTradeCreate):
         leverage=data.leverage,
         stop_loss_pct=data.stop_loss_pct,
         take_profit_pct=data.take_profit_pct,
+        order_mode=data.order_mode,
         slice_chunks=data.slice_chunks,
         slice_delay_sec=data.slice_delay_sec,
         credential_id=data.credential_id,
@@ -128,22 +131,42 @@ async def open_quick_trade(data: QuickTradeCreate):
     is_ask_a = data.direction == -1  # sell A if direction is -1
     is_ask_b = data.direction == 1   # sell B if direction is 1
 
-    # Execute sliced market orders
+    # Execute entry orders
     try:
-        result_a, result_b, completed = await execute_chunked_pair_orders(
-            client=client,
-            market_a=market_a,
-            market_b=market_b,
-            size_a=size_a,
-            size_b=size_b,
-            is_ask_a=is_ask_a,
-            is_ask_b=is_ask_b,
-            chunks=data.slice_chunks,
-            delay_sec=data.slice_delay_sec,
-            reduce_only=False,
-            market=True,
-            label=f"QT-{trade_id}",
-        )
+        if data.order_mode in ("sliced", "limit"):
+            result_a, result_b, completed = await execute_chunked_pair_orders(
+                client=client,
+                market_a=market_a,
+                market_b=market_b,
+                size_a=size_a,
+                size_b=size_b,
+                is_ask_a=is_ask_a,
+                is_ask_b=is_ask_b,
+                chunks=data.slice_chunks,
+                delay_sec=data.slice_delay_sec,
+                reduce_only=False,
+                market=(data.order_mode == "sliced"),
+                label=f"QT-{trade_id}",
+            )
+        else:
+            worst_price_a = mid_a * (1 - MARKET_SLIPPAGE) if is_ask_a else mid_a * (1 + MARKET_SLIPPAGE)
+            worst_price_b = mid_b * (1 - MARKET_SLIPPAGE) if is_ask_b else mid_b * (1 + MARKET_SLIPPAGE)
+            pair_result = await client.place_pair_orders(
+                market_index_a=market_a,
+                base_amount_a=size_a,
+                price_a=worst_price_a,
+                is_ask_a=is_ask_a,
+                market_index_b=market_b,
+                base_amount_b=size_b,
+                price_b=worst_price_b,
+                is_ask_b=is_ask_b,
+                market=True,
+            )
+            result_a = pair_result.result_a
+            result_b = pair_result.result_b
+            completed = 1 if pair_result.success else 0
+            if not pair_result.success:
+                raise RuntimeError(pair_result.error or result_a.error or result_b.error or "Batch order failed")
     except Exception as e:
         logger.error(f"[QT-{trade_id}] Execution failed: {e}", exc_info=True)
         _update_trade_status(trade_id, "failed")
@@ -154,7 +177,7 @@ async def open_quick_trade(data: QuickTradeCreate):
         raise HTTPException(500, "No chunks filled")
 
     # Scale notional by fill ratio
-    actual_notional = notional * (completed / data.slice_chunks)
+    actual_notional = notional if data.order_mode == "market" else notional * (completed / data.slice_chunks)
 
     # Update trade with fill data
     now = datetime.now(timezone.utc)
@@ -238,7 +261,8 @@ async def close_quick_trade(trade_id: int):
 async def _close_trade(trade_id: int, exit_reason: str):
     """Close an open simple trade by executing reverse orders."""
     from backend.engine.pair_job import _get_lighter_client
-    from backend.engine.order_executor import execute_chunked_pair_orders
+    from backend.engine.order_executor import MARKET_SLIPPAGE, execute_chunked_pair_orders
+    from backend.services.market_data import fetch_orderbook
 
     lock = _get_lock(trade_id)
     async with lock:
@@ -257,20 +281,50 @@ async def _close_trade(trade_id: int, exit_reason: str):
         is_ask_b = trade.direction == -1  # sell B to close long
 
         try:
-            result_a, result_b, completed = await execute_chunked_pair_orders(
-                client=client,
-                market_a=trade.lighter_market_a,
-                market_b=trade.lighter_market_b,
-                size_a=trade.fill_size_a,
-                size_b=trade.fill_size_b,
-                is_ask_a=is_ask_a,
-                is_ask_b=is_ask_b,
-                chunks=trade.slice_chunks,
-                delay_sec=trade.slice_delay_sec,
-                reduce_only=True,
-                market=True,
-                label=f"QT-{trade_id}-close",
-            )
+            if trade.order_mode in ("sliced", "limit"):
+                result_a, result_b, completed = await execute_chunked_pair_orders(
+                    client=client,
+                    market_a=trade.lighter_market_a,
+                    market_b=trade.lighter_market_b,
+                    size_a=trade.fill_size_a,
+                    size_b=trade.fill_size_b,
+                    is_ask_a=is_ask_a,
+                    is_ask_b=is_ask_b,
+                    chunks=trade.slice_chunks,
+                    delay_sec=trade.slice_delay_sec,
+                    reduce_only=True,
+                    market=(trade.order_mode == "sliced"),
+                    label=f"QT-{trade_id}-close",
+                )
+            else:
+                ob_a, ob_b = await asyncio.gather(
+                    fetch_orderbook(trade.lighter_market_a),
+                    fetch_orderbook(trade.lighter_market_b),
+                )
+                mid_a = ob_a["mid_price"]
+                mid_b = ob_b["mid_price"]
+                if mid_a <= 0 or mid_b <= 0:
+                    raise ValueError(f"Invalid mid prices: A={mid_a}, B={mid_b}")
+
+                worst_price_a = mid_a * (1 - MARKET_SLIPPAGE) if is_ask_a else mid_a * (1 + MARKET_SLIPPAGE)
+                worst_price_b = mid_b * (1 - MARKET_SLIPPAGE) if is_ask_b else mid_b * (1 + MARKET_SLIPPAGE)
+                pair_result = await client.place_pair_orders(
+                    market_index_a=trade.lighter_market_a,
+                    base_amount_a=trade.fill_size_a,
+                    price_a=worst_price_a,
+                    is_ask_a=is_ask_a,
+                    market_index_b=trade.lighter_market_b,
+                    base_amount_b=trade.fill_size_b,
+                    price_b=worst_price_b,
+                    is_ask_b=is_ask_b,
+                    market=True,
+                    reduce_only=True,
+                )
+                result_a = pair_result.result_a
+                result_b = pair_result.result_b
+                completed = 1 if pair_result.success else 0
+                if not pair_result.success:
+                    raise RuntimeError(pair_result.error or result_a.error or result_b.error or "Batch close failed")
         except Exception as e:
             logger.error(f"[QT-{trade_id}] Close execution failed: {e}", exc_info=True)
             return

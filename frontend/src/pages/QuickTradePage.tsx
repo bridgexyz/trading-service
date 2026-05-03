@@ -141,6 +141,7 @@ const defaults = {
   leverage: 5,
   stop_loss_pct: 15,
   take_profit_pct: 5,
+  order_mode: "limit" as "market" | "sliced" | "limit",
   slice_chunks: 5,
   slice_delay_sec: 2,
   credential_id: null as number | null,
@@ -232,6 +233,7 @@ export default function QuickTradePage() {
 
   const openTrades = trades.filter((t) => t.status === "open");
   const closedTrades = trades.filter((t) => t.status === "closed" || t.status === "failed");
+  const usesChunkControls = form.order_mode === "sliced" || form.order_mode === "limit";
   const canOpenTrade =
     !!form.asset_a &&
     !!form.asset_b &&
@@ -240,7 +242,15 @@ export default function QuickTradePage() {
     hasNumber(form.margin_usd) &&
     hasNumber(form.leverage) &&
     hasNumber(form.stop_loss_pct) &&
-    hasNumber(form.take_profit_pct);
+    hasNumber(form.take_profit_pct) &&
+    (!usesChunkControls || (hasNumber(form.slice_chunks) && hasNumber(form.slice_delay_sec)));
+  const openTrade = () => {
+    openMut.mutate({
+      ...form,
+      slice_chunks: hasNumber(form.slice_chunks) ? form.slice_chunks : defaults.slice_chunks,
+      slice_delay_sec: hasNumber(form.slice_delay_sec) ? form.slice_delay_sec : defaults.slice_delay_sec,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -294,6 +304,26 @@ export default function QuickTradePage() {
           <NumberField label="Leverage" value={form.leverage} onChange={(v) => set("leverage", v)} step={1} min={1} />
           <NumberField label="Stop Loss %" value={form.stop_loss_pct} onChange={(v) => set("stop_loss_pct", v)} step={1} min={1} />
           <NumberField label="Take Profit %" value={form.take_profit_pct} onChange={(v) => set("take_profit_pct", v)} step={1} min={1} />
+          <div>
+            <label className="text-[10px] text-text-secondary uppercase tracking-[0.12em] block mb-1.5 font-mono">
+              Order Mode
+            </label>
+            <select
+              className="bg-surface-2/80 border border-border-default rounded-md px-3 py-2 text-[13px] font-mono text-text-primary hover:border-border-hover focus:border-accent/40 focus:outline-none transition-all"
+              value={form.order_mode}
+              onChange={(e) => set("order_mode", e.target.value)}
+            >
+              <option value="market">Market</option>
+              <option value="sliced">Sliced</option>
+              <option value="limit">Limit</option>
+            </select>
+          </div>
+          {usesChunkControls && (
+            <>
+              <NumberField label="Chunks" value={form.slice_chunks} onChange={(v) => set("slice_chunks", v)} step={1} min={2} />
+              <NumberField label="Delay (sec)" value={form.slice_delay_sec} onChange={(v) => set("slice_delay_sec", v)} step={0.5} min={0.5} />
+            </>
+          )}
         </div>
 
         {/* Credential + submit */}
@@ -316,7 +346,7 @@ export default function QuickTradePage() {
           <button
             className="px-5 py-2 bg-accent text-surface-0 rounded-md text-[12px] font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-all"
             disabled={!canOpenTrade || openMut.isPending}
-            onClick={() => openMut.mutate(form)}
+            onClick={openTrade}
           >
             {openMut.isPending ? "Opening..." : "Open Trade"}
           </button>
@@ -339,6 +369,7 @@ export default function QuickTradePage() {
                   <th className="text-left py-2 px-2">Direction</th>
                   <th className="text-right py-2 px-2">Margin</th>
                   <th className="text-right py-2 px-2">Leverage</th>
+                  <th className="text-left py-2 px-2">Mode</th>
                   <th className="text-right py-2 px-2">SL / TP</th>
                   <th className="text-right py-2 px-2">Notional</th>
                   <th className="text-left py-2 px-2">Opened</th>
@@ -358,6 +389,7 @@ export default function QuickTradePage() {
                     </td>
                     <td className="py-2 px-2 text-right text-text-primary">${t.margin_usd}</td>
                     <td className="py-2 px-2 text-right text-text-primary">{t.leverage}x</td>
+                    <td className="py-2 px-2 text-text-muted capitalize">{t.order_mode}</td>
                     <td className="py-2 px-2 text-right text-text-muted">
                       {editingTradeId === t.id ? (
                         <div className="flex justify-end items-end gap-2">

@@ -18,6 +18,7 @@ class SimplePairTrade(SQLModel, table=True):
     leverage: float = Field(default=5.0)
     stop_loss_pct: float = Field(default=15.0)
     take_profit_pct: float = Field(default=5.0)
+    order_mode: str = Field(default="limit")  # "market", "sliced", or "limit"
     slice_chunks: int = Field(default=5)
     slice_delay_sec: float = Field(default=2.0)
     credential_id: int | None = Field(default=None, foreign_key="credential.id")

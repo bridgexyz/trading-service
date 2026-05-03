@@ -170,6 +170,15 @@ def _run_migrations():
                 ))
                 conn.commit()
 
+    # Add order mode to quick trades.
+    if "simple_pair_trade" in inspector.get_table_names():
+        simple_columns = {col["name"] for col in inspector.get_columns("simple_pair_trade")}
+        if "order_mode" not in simple_columns:
+            logger.info("Migrating: adding order_mode column to simple_pair_trade")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE simple_pair_trade ADD COLUMN order_mode VARCHAR NOT NULL DEFAULT 'limit'"))
+                conn.commit()
+
 
 def create_db_and_tables():
     """Create all tables. Called on startup."""
